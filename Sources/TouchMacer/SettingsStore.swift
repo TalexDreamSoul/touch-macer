@@ -11,6 +11,7 @@ final class SettingsStore {
         static let appearanceTimeZoneID = "appearanceTimeZoneID"
         static let appliesSystemAppearance = "appliesSystemAppearance"
         static let overviewTimeZoneID = "overviewTimeZoneID"
+        static let calendarWeekStartDay = "calendarWeekStartDay"
         static let calendarSelectionMode = "calendarSelectionMode"
         static let selectedCalendarIDs = "selectedCalendarIDs"
     }
@@ -42,6 +43,7 @@ final class SettingsStore {
             appearanceTimeZoneID: defaults.string(forKey: Key.appearanceTimeZoneID) ?? systemTimeZoneID,
             appliesSystemAppearance: defaults.bool(forKey: Key.appliesSystemAppearance),
             overviewTimeZoneID: defaults.string(forKey: Key.overviewTimeZoneID) ?? systemTimeZoneID,
+            calendarWeekStartDay: loadCalendarWeekStartDay(defaultValue: .monday),
             calendarSelectionMode: CalendarSelectionMode(rawValue: defaults.string(forKey: Key.calendarSelectionMode) ?? "") ?? .all,
             selectedCalendarIDs: Set(defaults.stringArray(forKey: Key.selectedCalendarIDs) ?? [])
         )
@@ -57,6 +59,7 @@ final class SettingsStore {
         defaults.set(settings.appearanceTimeZoneID, forKey: Key.appearanceTimeZoneID)
         defaults.set(settings.appliesSystemAppearance, forKey: Key.appliesSystemAppearance)
         defaults.set(settings.overviewTimeZoneID, forKey: Key.overviewTimeZoneID)
+        defaults.set(settings.calendarWeekStartDay.rawValue, forKey: Key.calendarWeekStartDay)
         defaults.set(settings.calendarSelectionMode.rawValue, forKey: Key.calendarSelectionMode)
         defaults.set(Array(settings.selectedCalendarIDs).sorted(), forKey: Key.selectedCalendarIDs)
     }
@@ -69,6 +72,11 @@ final class SettingsStore {
     private func loadStatusBarSwitchIntervalSeconds(defaultValue: TimeInterval) -> TimeInterval {
         guard defaults.object(forKey: Key.statusBarSwitchIntervalSeconds) != nil else { return defaultValue }
         return min(30, max(2, defaults.double(forKey: Key.statusBarSwitchIntervalSeconds)))
+    }
+
+    private func loadCalendarWeekStartDay(defaultValue: WeekStartDay) -> WeekStartDay {
+        guard defaults.object(forKey: Key.calendarWeekStartDay) != nil else { return defaultValue }
+        return WeekStartDay(rawValue: defaults.integer(forKey: Key.calendarWeekStartDay)) ?? defaultValue
     }
 
     private func defaultSelectedTimeZoneIDs(

@@ -3,7 +3,6 @@ import Foundation
 
 final class AppModel: ObservableObject {
     @Published private(set) var settings: AppSettings
-    @Published var selectedPage: PopoverPage = .overview
     @Published private(set) var authorizationState: CalendarAuthorizationState
     @Published private(set) var calendars: [CalendarInfo] = []
     @Published private(set) var events: [CalendarEventInfo] = []
@@ -43,6 +42,20 @@ final class AppModel: ObservableObject {
             guard !settings.selectedTimeZoneIDs.contains(identifier) else { return }
             guard !(settings.showsSystemTimeZone && identifier == systemIdentifier) else { return }
             settings.selectedTimeZoneIDs.append(identifier)
+        }
+    }
+
+    func quickEventDraft(startDate: Date = Date()) -> QuickEventDraft {
+        QuickEventDraft(startDate: startDate, calendarID: calendarService.defaultNewEventCalendarID)
+    }
+
+    func createEvent(from draft: QuickEventDraft) {
+        do {
+            try calendarService.createEvent(from: draft)
+            errorMessage = nil
+            refreshCalendarData()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 

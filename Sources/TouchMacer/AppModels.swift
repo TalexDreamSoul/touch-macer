@@ -10,6 +10,7 @@ struct AppSettings: Equatable {
     var appearanceTimeZoneID: String
     var appliesSystemAppearance: Bool
     var overviewTimeZoneID: String
+    var calendarWeekStartDay: WeekStartDay
     var calendarSelectionMode: CalendarSelectionMode
     var selectedCalendarIDs: Set<String>
 
@@ -142,19 +143,31 @@ enum CalendarSelectionMode: String, CaseIterable, Identifiable {
     }
 }
 
-enum PopoverPage: String, CaseIterable, Identifiable {
-    case overview
-    case settings
+enum WeekStartDay: Int, CaseIterable, Identifiable {
+    case sunday = 1
+    case monday = 2
+    case tuesday = 3
+    case wednesday = 4
+    case thursday = 5
+    case friday = 6
+    case saturday = 7
 
-    var id: String { rawValue }
+    var id: Int { rawValue }
+    var firstWeekday: Int { rawValue }
 
     var title: String {
         switch self {
-        case .overview: return "Overview"
-        case .settings: return "Settings"
+        case .sunday: return "Sunday"
+        case .monday: return "Monday"
+        case .tuesday: return "Tuesday"
+        case .wednesday: return "Wednesday"
+        case .thursday: return "Thursday"
+        case .friday: return "Friday"
+        case .saturday: return "Saturday"
         }
     }
 }
+
 
 enum CalendarAuthorizationState: Equatable {
     case notDetermined
@@ -193,6 +206,93 @@ struct CalendarEventInfo: Identifiable, Equatable {
     let startDate: Date
     let endDate: Date
     let isAllDay: Bool
+}
+
+struct QuickEventDraft: Equatable {
+    var title: String
+    var location: String
+    var notes: String
+    var urlString: String
+    var calendarID: String?
+    var startDate: Date
+    var endDate: Date
+    var isAllDay: Bool
+    var repeatMode: EventRepeatMode
+    var alertMode: EventAlertMode
+
+    init(startDate: Date, calendarID: String?) {
+        let roundedStartDate = Self.roundedStartDate(from: startDate)
+        self.title = "New Event"
+        self.location = ""
+        self.notes = ""
+        self.urlString = ""
+        self.calendarID = calendarID
+        self.startDate = roundedStartDate
+        self.endDate = roundedStartDate.addingTimeInterval(60 * 60)
+        self.isAllDay = false
+        self.repeatMode = .none
+        self.alertMode = .none
+    }
+
+    private static func roundedStartDate(from date: Date) -> Date {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.year, .month, .day, .hour], from: date)
+        guard let hourStart = calendar.date(from: components) else { return date }
+        if date.timeIntervalSince(hourStart) == 0 {
+            return hourStart
+        }
+        return calendar.date(byAdding: .hour, value: 1, to: hourStart) ?? date
+    }
+}
+
+enum EventRepeatMode: String, CaseIterable, Identifiable {
+    case none
+    case daily
+    case weekly
+    case monthly
+    case yearly
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .none: return "None"
+        case .daily: return "Daily"
+        case .weekly: return "Weekly"
+        case .monthly: return "Monthly"
+        case .yearly: return "Yearly"
+        }
+    }
+}
+
+enum EventAlertMode: String, CaseIterable, Identifiable {
+    case none
+    case atStart
+    case fiveMinutesBefore
+    case fifteenMinutesBefore
+    case oneHourBefore
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .none: return "None"
+        case .atStart: return "At start"
+        case .fiveMinutesBefore: return "5 minutes before"
+        case .fifteenMinutesBefore: return "15 minutes before"
+        case .oneHourBefore: return "1 hour before"
+        }
+    }
+
+    var relativeOffset: TimeInterval? {
+        switch self {
+        case .none: return nil
+        case .atStart: return 0
+        case .fiveMinutesBefore: return -5 * 60
+        case .fifteenMinutesBefore: return -15 * 60
+        case .oneHourBefore: return -60 * 60
+        }
+    }
 }
 
 enum TimeZoneCatalog {

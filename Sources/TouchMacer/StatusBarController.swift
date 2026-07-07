@@ -7,9 +7,12 @@ final class StatusBarController: NSObject {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let model: AppModel
+    private var settingsWindow: NSWindow?
+    private var quickEventWindow: NSWindow?
     private var timer: Timer?
     private var settingsCancellable: AnyCancellable?
     private var currentStatusClockID: String?
+    private var manualStatusClockID: String?
     private lazy var dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -52,8 +55,12 @@ final class StatusBarController: NSObject {
 
     private func configurePopover() {
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 460, height: 700)
-        let hostingController = NSHostingController(rootView: StatusPopoverView(model: model))
+        popover.contentSize = NSSize(width: 280, height: 560)
+        let hostingController = NSHostingController(
+            rootView: StatusPopoverView(model: model, openSettings: { [weak self] in
+                self?.showSettingsWindow()
+            })
+        )
         hostingController.view.appearance = NSApp.appearance
         popover.contentViewController = hostingController
     }
@@ -76,14 +83,28 @@ final class StatusBarController: NSObject {
 
     private func refreshClockTitle() {
         popover.contentViewController?.view.appearance = NSApp.appearance
+        settingsWindow?.contentViewController?.view.appearance = NSApp.appearance
+        quickEventWindow?.contentViewController?.view.appearance = NSApp.appearance
         let now = Date()
         let clocks = model.settings.clockTimeZones
-        let clock = model.settings.statusBarClock(at: now)
+        let clock = currentStatusClock(at: now)
         let attributedTitle = NSMutableAttributedString(string: " ")
         appendClock(clock, at: now, includeLabel: clocks.count > 1, to: attributedTitle)
         attributedTitle.append(NSAttributedString(string: " ", attributes: baseTitleAttributes))
         let shouldAnimate = currentStatusClockID != nil && currentStatusClockID != clock.id
         applyStatusTitle(attributedTitle, clockID: clock.id, animated: shouldAnimate)
+    }
+
+    private func currentStatusClock(at date: Date) -> ClockTimeZone {
+        let clocks = model.settings.clockTimeZones
+        if let manualStatusClockID,
+           let clock = clocks.first(where: { $0.id == manualStatusClockID }) {
+            return clock
+        }
+        if manualStatusClockID != nil {
+            manualStatusClockID = nil
+        }
+        return model.settings.statusBarClock(at: date)
     }
 
     private var baseTitleAttributes: [NSAttributedString.Key: Any] {
@@ -201,34 +222,151 @@ final class StatusBarController: NSObject {
     @objc private func handleStatusItemClick(_ sender: NSStatusBarButton) {
         switch NSApp.currentEvent?.type {
         case .rightMouseDown, .rightMouseUp:
-            showPageMenu(relativeTo: sender)
+            showContextMenu(relativeTo: sender)
         default:
             togglePopover()
         }
     }
 
-    private func showPageMenu(relativeTo button: NSStatusBarButton) {
+    private func showContextMenu(relativeTo button: NSStatusBarButton) {
         let menu = NSMenu()
-        let headerItem = NSMenuItem(title: "Page", action: nil, keyEquivalent: "")
-        headerItem.isEnabled = false
-        menu.addItem(headerItem)
+        let overviewItem = NSMenuItem(
+            title: popover.isShown ? "Hide Overview" : "Show Overview",
+            action: #selector(togglePopoverFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        overviewItem.target = self
+        menu.addItem(overviewItem)
 
-        for page in PopoverPage.allCases {
-            let item = NSMenuItem(title: page.title, action: #selector(selectPageFromMenu(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = page.rawValue
-            item.state = model.selectedPage == page ? .on : .off
-            menu.addItem(item)
-        }
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettingsFromMenu(_:)), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        let newEventItem = NSMenuItem(title: "New Event…", action: #selector(openNewEventFromMenu(_:)), keyEquivalent: "n")
+        newEventItem.target = self
+        newEventItem.isEnabled = model.authorizationState.canReadEvents || model.authorizationState == .notDetermined
+        menu.addItem(newEventItem)
+
+        menu.addItem(NSMenuItem.separator())
+        let quickItem = NSMenuItem(title: "Quick Time Zone", action: nil, keyEquivalent: "")
+        menu.setSubmenu(quickTimeZoneMenu(), for: quickItem)
+        menu.addItem(quickItem)
+
+        menu.addItem(NSMenuItem.separator())
+        let exitItem = NSMenuItem(title: "Exit TouchMacer", action: #selector(exitFromMenu(_:)), keyEquivalent: "q")
+        exitItem.target = self
+        menu.addItem(exitItem)
 
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 2), in: button)
     }
 
-    @objc private func selectPageFromMenu(_ sender: NSMenuItem) {
-        guard let rawValue = sender.representedObject as? String,
-              let page = PopoverPage(rawValue: rawValue) else { return }
-        model.selectedPage = page
-        showPopover()
+    private func quickTimeZoneMenu() -> NSMenu {
+        let menu = NSMenu()
+        let autoItem = NSMenuItem(title: "Auto Rotate", action: #selector(clearManualClockSelection(_:)), keyEquivalent: "")
+        autoItem.target = self
+        autoItem.state = manualStatusClockID == nil ? .on : .off
+        menu.addItem(autoItem)
+        menu.addItem(NSMenuItem.separator())
+
+        for clock in model.settings.clockTimeZones {
+            let item = NSMenuItem(title: "\(clock.flag) \(clock.title)", action: #selector(selectClockFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = clock.id
+            item.toolTip = clock.subtitle
+            item.state = manualStatusClockID == clock.id ? .on : .off
+            menu.addItem(item)
+        }
+
+        return menu
+    }
+
+    @objc private func togglePopoverFromMenu(_ sender: NSMenuItem) {
+        togglePopover()
+    }
+
+    @objc private func openSettingsFromMenu(_ sender: NSMenuItem) {
+        showSettingsWindow()
+    }
+
+    @objc private func openNewEventFromMenu(_ sender: NSMenuItem) {
+        showQuickEventWindow()
+    }
+
+    @objc private func clearManualClockSelection(_ sender: NSMenuItem) {
+        manualStatusClockID = nil
+        refreshClockTitle()
+    }
+
+    @objc private func selectClockFromMenu(_ sender: NSMenuItem) {
+        guard let clockID = sender.representedObject as? String else { return }
+        manualStatusClockID = clockID
+        refreshClockTitle()
+    }
+
+    @objc private func exitFromMenu(_ sender: NSMenuItem) {
+        NSApp.terminate(nil)
+    }
+
+    private func showSettingsWindow() {
+        popover.performClose(nil)
+        model.refreshCalendarData()
+
+        let window: NSWindow
+        if let settingsWindow {
+            window = settingsWindow
+        } else {
+            window = makeSettingsWindow()
+            settingsWindow = window
+        }
+
+        window.contentViewController?.view.appearance = NSApp.appearance
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func makeSettingsWindow() -> NSWindow {
+        let hostingController = NSHostingController(rootView: SettingsWindowView(model: model))
+        hostingController.view.appearance = NSApp.appearance
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "TouchMacer Settings"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.setContentSize(NSSize(width: 480, height: 640))
+        window.minSize = NSSize(width: 420, height: 520)
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.setFrameAutosaveName("TouchMacerSettingsWindow")
+        return window
+    }
+
+    private func showQuickEventWindow() {
+        if model.authorizationState == .notDetermined {
+            model.requestCalendarAccess()
+            return
+        }
+        guard model.authorizationState.canReadEvents else { return }
+        popover.performClose(nil)
+        model.refreshCalendarData()
+
+        let hostingController = NSHostingController(
+            rootView: QuickEventWindowView(model: model) { [weak self] in
+                self?.quickEventWindow?.close()
+            }
+        )
+        hostingController.view.appearance = NSApp.appearance
+
+        let window = quickEventWindow ?? NSWindow(contentViewController: hostingController)
+        if quickEventWindow != nil {
+            window.contentViewController = hostingController
+        } else {
+            window.title = "New Event"
+            window.styleMask = [.titled, .closable]
+            window.isReleasedWhenClosed = false
+            window.center()
+            quickEventWindow = window
+        }
+        window.contentViewController?.view.appearance = NSApp.appearance
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func togglePopover() {

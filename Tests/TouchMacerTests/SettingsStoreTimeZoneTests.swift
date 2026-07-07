@@ -34,6 +34,53 @@ final class SettingsStoreTimeZoneTests: XCTestCase {
         XCTAssertEqual(firstClock?.isSystem, true)
     }
 
+    func testEmptyDefaultsLoadMondayAsCalendarWeekStartDay() {
+        let settings = store.load()
+
+        XCTAssertEqual(settings.calendarWeekStartDay, .monday)
+    }
+
+    func testCalendarWeekStartDayPersistsAcrossSaveAndLoad() {
+        var settings = store.load()
+        settings.calendarWeekStartDay = .sunday
+
+        store.save(settings)
+
+        let reloaded = SettingsStore(defaults: defaults).load()
+
+        XCTAssertEqual(reloaded.calendarWeekStartDay, .sunday)
+    }
+
+    func testQuickEventDraftRoundsStartDateUpToNextHourAndSetsOneHourDuration() throws {
+        var calendar = Calendar.current
+        calendar.timeZone = TimeZone.current
+        let requestedStart = try XCTUnwrap(calendar.date(from: DateComponents(
+            calendar: calendar,
+            timeZone: calendar.timeZone,
+            year: 2026,
+            month: 1,
+            day: 15,
+            hour: 9,
+            minute: 37,
+            second: 42
+        )))
+        let expectedStart = try XCTUnwrap(calendar.date(from: DateComponents(
+            calendar: calendar,
+            timeZone: calendar.timeZone,
+            year: 2026,
+            month: 1,
+            day: 15,
+            hour: 10,
+            minute: 0,
+            second: 0
+        )))
+
+        let draft = QuickEventDraft(startDate: requestedStart, calendarID: "primary")
+
+        XCTAssertEqual(draft.startDate, expectedStart)
+        XCTAssertEqual(draft.endDate, expectedStart.addingTimeInterval(60 * 60))
+    }
+
     func testOverviewTimeZonePersistsSeparatelyFromMenuBarAndAppearanceTimeZones() {
         var settings = store.load()
         settings.selectedTimeZoneIDs = ["America/New_York", "Asia/Tokyo"]
