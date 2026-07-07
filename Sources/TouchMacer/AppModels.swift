@@ -5,8 +5,10 @@ struct AppSettings: Equatable {
     var customDisplayTimeZoneID: String
     var showsSystemTimeZone: Bool
     var selectedTimeZoneIDs: [String]
+    var statusBarSwitchIntervalSeconds: TimeInterval
     var appearanceMode: AppearanceMode
     var appearanceTimeZoneID: String
+    var appliesSystemAppearance: Bool
     var overviewTimeZoneID: String
     var calendarSelectionMode: CalendarSelectionMode
     var selectedCalendarIDs: Set<String>
@@ -41,6 +43,16 @@ struct AppSettings: Equatable {
     var overviewTimeZone: TimeZone {
         TimeZone(identifier: overviewTimeZoneID) ?? displayTimeZone
     }
+
+    func statusBarClock(at date: Date, switchInterval: TimeInterval? = nil) -> ClockTimeZone {
+        let clocks = clockTimeZones
+        let effectiveSwitchInterval = switchInterval ?? statusBarSwitchIntervalSeconds
+        guard clocks.count > 1, effectiveSwitchInterval > 0 else { return clocks[0] }
+
+        let slot = Int(floor(date.timeIntervalSinceReferenceDate / effectiveSwitchInterval))
+        let index = ((slot % clocks.count) + clocks.count) % clocks.count
+        return clocks[index]
+    }
 }
 
 struct ClockTimeZone: Identifiable, Equatable {
@@ -49,6 +61,7 @@ struct ClockTimeZone: Identifiable, Equatable {
     let title: String
     let menuBarTitle: String
     let statusBarTitle: String
+    let flag: String
     let subtitle: String
     let timeZone: TimeZone
     let isSystem: Bool
@@ -57,9 +70,10 @@ struct ClockTimeZone: Identifiable, Equatable {
         ClockTimeZone(
             id: "system",
             identifier: timeZone.identifier,
-            title: "System Time Zone",
-            menuBarTitle: "Local",
-            statusBarTitle: "LOCAL",
+            title: TimeZoneCatalog.shortTitle(for: timeZone.identifier),
+            menuBarTitle: TimeZoneCatalog.shortTitle(for: timeZone.identifier),
+            statusBarTitle: TimeZoneCatalog.statusTitle(for: timeZone.identifier),
+            flag: TimeZoneCatalog.flag(for: timeZone.identifier),
             subtitle: TimeZoneCatalog.displayName(for: timeZone.identifier),
             timeZone: timeZone,
             isSystem: true
@@ -74,6 +88,7 @@ struct ClockTimeZone: Identifiable, Equatable {
             title: TimeZoneCatalog.shortTitle(for: identifier),
             menuBarTitle: TimeZoneCatalog.shortTitle(for: identifier),
             statusBarTitle: TimeZoneCatalog.statusTitle(for: identifier),
+            flag: TimeZoneCatalog.flag(for: identifier),
             subtitle: TimeZoneCatalog.displayName(for: identifier),
             timeZone: timeZone,
             isSystem: false
@@ -123,6 +138,20 @@ enum CalendarSelectionMode: String, CaseIterable, Identifiable {
         switch self {
         case .all: return "All Calendars"
         case .custom: return "Selected Calendars"
+        }
+    }
+}
+
+enum PopoverPage: String, CaseIterable, Identifiable {
+    case overview
+    case settings
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .overview: return "Overview"
+        case .settings: return "Settings"
         }
     }
 }
@@ -205,6 +234,75 @@ enum TimeZoneCatalog {
             .prefix(3)
             .map { String($0).uppercased() }
             .joined()
+    }
+
+    static func flag(for identifier: String) -> String {
+        guard let countryCode = countryCode(for: identifier) else { return "🌐" }
+        return countryCode.uppercased().unicodeScalars.compactMap { scalar in
+            UnicodeScalar(127397 + scalar.value).map(String.init)
+        }.joined()
+    }
+
+    private static func countryCode(for identifier: String) -> String? {
+        let normalizedIdentifier = identifier.replacingOccurrences(of: "_", with: " ")
+        let city = shortTitle(for: identifier)
+        let directMatches = [
+            "America/Los Angeles": "US",
+            "America/New York": "US",
+            "America/Chicago": "US",
+            "America/Denver": "US",
+            "America/Phoenix": "US",
+            "America/Anchorage": "US",
+            "Pacific/Honolulu": "US",
+            "America/Toronto": "CA",
+            "America/Vancouver": "CA",
+            "America/Mexico City": "MX",
+            "America/Sao Paulo": "BR",
+            "America/Buenos Aires": "AR",
+            "Europe/London": "GB",
+            "Europe/Paris": "FR",
+            "Europe/Berlin": "DE",
+            "Europe/Rome": "IT",
+            "Europe/Madrid": "ES",
+            "Europe/Amsterdam": "NL",
+            "Europe/Zurich": "CH",
+            "Europe/Stockholm": "SE",
+            "Europe/Moscow": "RU",
+            "Asia/Shanghai": "CN",
+            "Asia/Hong Kong": "HK",
+            "Asia/Singapore": "SG",
+            "Asia/Tokyo": "JP",
+            "Asia/Seoul": "KR",
+            "Asia/Taipei": "TW",
+            "Asia/Bangkok": "TH",
+            "Asia/Jakarta": "ID",
+            "Asia/Kolkata": "IN",
+            "Asia/Dubai": "AE",
+            "Asia/Jerusalem": "IL",
+            "Australia/Sydney": "AU",
+            "Australia/Melbourne": "AU",
+            "Australia/Perth": "AU",
+            "Pacific/Auckland": "NZ"
+        ]
+        if let countryCode = directMatches[normalizedIdentifier] {
+            return countryCode
+        }
+
+        let cityMatches = [
+            "Los Angeles": "US",
+            "New York": "US",
+            "London": "GB",
+            "Paris": "FR",
+            "Berlin": "DE",
+            "Shanghai": "CN",
+            "Hong Kong": "HK",
+            "Singapore": "SG",
+            "Tokyo": "JP",
+            "Seoul": "KR",
+            "Sydney": "AU",
+            "Dubai": "AE"
+        ]
+        return cityMatches[city]
     }
 
     static func offsetText(for timeZone: TimeZone, date: Date = Date()) -> String {

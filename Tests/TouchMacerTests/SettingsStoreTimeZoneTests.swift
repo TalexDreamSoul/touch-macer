@@ -52,4 +52,46 @@ final class SettingsStoreTimeZoneTests: XCTestCase {
         XCTAssertNotEqual(reloaded.overviewTimeZoneID, reloaded.selectedTimeZoneIDs.first)
         XCTAssertNotEqual(reloaded.overviewTimeZoneID, reloaded.appearanceTimeZoneID)
     }
+
+    func testStatusBarSwitchIntervalPersists() {
+        var settings = store.load()
+        settings.statusBarSwitchIntervalSeconds = 8
+
+        store.save(settings)
+
+        let reloaded = SettingsStore(defaults: defaults).load()
+
+        XCTAssertEqual(reloaded.statusBarSwitchIntervalSeconds, 8)
+    }
+
+    func testStatusBarClockRotatesAcrossConfiguredTimeZones() {
+        var settings = store.load()
+        settings.showsSystemTimeZone = false
+        settings.selectedTimeZoneIDs = ["America/Los_Angeles", "Asia/Shanghai"]
+
+        let start = Date(timeIntervalSinceReferenceDate: 0)
+
+        XCTAssertEqual(settings.statusBarClock(at: start, switchInterval: 5).identifier, "America/Los_Angeles")
+        XCTAssertEqual(settings.statusBarClock(at: start.addingTimeInterval(4.9), switchInterval: 5).identifier, "America/Los_Angeles")
+        XCTAssertEqual(settings.statusBarClock(at: start.addingTimeInterval(5), switchInterval: 5).identifier, "Asia/Shanghai")
+        XCTAssertEqual(settings.statusBarClock(at: start.addingTimeInterval(10), switchInterval: 5).identifier, "America/Los_Angeles")
+
+        settings.statusBarSwitchIntervalSeconds = 3
+        XCTAssertEqual(settings.statusBarClock(at: start.addingTimeInterval(2.9)).identifier, "America/Los_Angeles")
+        XCTAssertEqual(settings.statusBarClock(at: start.addingTimeInterval(3)).identifier, "Asia/Shanghai")
+    }
+
+    func testSystemClockUsesCompactTimeZoneIdentifier() {
+        let settings = store.load()
+        let systemClock = settings.clockTimeZones.first
+
+        XCTAssertNotEqual(systemClock?.statusBarTitle, "LOCAL")
+        XCTAssertFalse(systemClock?.statusBarTitle.isEmpty ?? true)
+    }
+
+    func testKnownTimeZonesExposeLocalCountryFlags() {
+        XCTAssertEqual(TimeZoneCatalog.flag(for: "America/Los_Angeles"), "🇺🇸")
+        XCTAssertEqual(TimeZoneCatalog.flag(for: "Asia/Shanghai"), "🇨🇳")
+        XCTAssertEqual(TimeZoneCatalog.flag(for: "Europe/London"), "🇬🇧")
+    }
 }

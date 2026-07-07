@@ -16,21 +16,13 @@ private func eventAccentColor(for event: CalendarEventInfo) -> Color {
 
 struct StatusPopoverView: View {
     @ObservedObject var model: AppModel
-    @State private var selectedPage: PopoverPage = .overview
     @State private var pendingTimeZoneID = TimeZone.autoupdatingCurrent.identifier
     @State private var visibleMonthDate = Date()
     @State private var selectedCalendarDate = Date()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Picker("Page", selection: $selectedPage) {
-                ForEach(PopoverPage.allCases) { page in
-                    Text(page.title).tag(page)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            switch selectedPage {
+        VStack(alignment: .leading, spacing: 12) {
+            switch model.selectedPage {
             case .overview:
                 overviewView
             case .settings:
@@ -38,7 +30,7 @@ struct StatusPopoverView: View {
             }
         }
         .padding(18)
-        .frame(width: 460, height: 760, alignment: .topLeading)
+        .frame(width: 460, height: 700, alignment: .topLeading)
     }
 
     private var overviewView: some View {
@@ -96,9 +88,6 @@ struct StatusPopoverView: View {
             ForEach(model.settings.clockTimeZones) { clock in
                 ClockCard(clock: clock, date: date)
             }
-            Text("System time zone is included by default: \(TimeZone.autoupdatingCurrent.identifier)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -109,12 +98,19 @@ struct StatusPopoverView: View {
 
             Toggle("Show system time zone", isOn: binding(\.showsSystemTimeZone))
 
+            Stepper(
+                "Switch every \(Int(model.settings.statusBarSwitchIntervalSeconds))s",
+                value: binding(\.statusBarSwitchIntervalSeconds),
+                in: 2...30,
+                step: 1
+            )
+
             VStack(alignment: .leading, spacing: 8) {
                 Text("Custom time zones")
                     .font(.subheadline.weight(.medium))
 
                 if selectedCustomTimeZones.isEmpty {
-                    Text("No custom time zones added. The system time zone stays visible by default.")
+                    Text("Add a custom time zone to rotate the menu bar clock.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -168,6 +164,12 @@ struct StatusPopoverView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Toggle("Apply to macOS system appearance", isOn: binding(\.appliesSystemAppearance))
+
+            Text("When enabled, TouchMacer switches the system Light/Dark appearance via macOS Automation permissions. When disabled, only this app previews the selected appearance.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -234,7 +236,7 @@ struct StatusPopoverView: View {
                     .font(.headline)
                 Spacer()
                 Button("Settings") {
-                    selectedPage = .settings
+                    model.selectedPage = .settings
                 }
             }
 
@@ -298,19 +300,6 @@ struct StatusPopoverView: View {
     }
 }
 
-private enum PopoverPage: String, CaseIterable, Identifiable {
-    case overview
-    case settings
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .overview: return "Overview"
-        case .settings: return "Settings"
-        }
-    }
-}
 
 private struct DateTimeHero: View {
     let date: Date
@@ -380,10 +369,10 @@ private struct ClockCard: View {
                 .monospacedDigit()
         }
         .padding(10)
-        .background(clock.isSystem ? Color.blue.opacity(0.10) : Color.purple.opacity(0.08))
+        .background(Color.purple.opacity(0.08))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(clock.isSystem ? Color.blue.opacity(0.22) : Color.purple.opacity(0.18), lineWidth: 1)
+                .stroke(Color.purple.opacity(0.18), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -407,10 +396,10 @@ private struct MonthCalendarView: View {
     private let weekdayTitles = ["M", "T", "W", "T", "F", "S", "S"]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
                 Text(monthName)
-                    .font(.title3.weight(.bold))
+                    .font(.headline.weight(.bold))
                 Menu {
                     ForEach(yearRange, id: \.self) { year in
                         Button("\(year)") {
@@ -419,7 +408,7 @@ private struct MonthCalendarView: View {
                     }
                 } label: {
                     Text(yearTitle)
-                        .font(.title3.weight(.bold))
+                        .font(.headline.weight(.bold))
                         .foregroundStyle(.primary)
                 }
                 .menuStyle(.borderlessButton)
@@ -441,68 +430,60 @@ private struct MonthCalendarView: View {
                     Image(systemName: "chevron.right")
                 }
             }
+            .controlSize(.small)
 
-            HStack(spacing: 4) {
+            HStack(spacing: 2) {
                 ForEach(Array(weekdayTitles.enumerated()), id: \.offset) { _, title in
                     Text(title)
-                        .font(.caption.weight(.semibold))
+                        .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
                 }
             }
 
-            ZStack {
-                LazyVGrid(columns: columns, spacing: 6) {
-                    ForEach(days) { day in
-                        Button {
-                            selectedDate = day.date
-                            monthDate = day.date
-                        } label: {
-                            VStack(spacing: 3) {
-                                Text("\(day.number)")
-                                    .font(.system(size: 15, weight: day.isSelected ? .bold : .semibold, design: .rounded))
-                                    .foregroundStyle(day.isInMonth ? Color.primary : Color.secondary.opacity(0.55))
-                                HStack(spacing: 2) {
-                                    ForEach(Array(day.eventColors.enumerated()), id: \.offset) { _, color in
-                                        Circle()
-                                            .fill(color)
-                                            .frame(width: 5, height: 5)
-                                    }
+            LazyVGrid(columns: columns, spacing: 3) {
+                ForEach(days) { day in
+                    Button {
+                        selectedDate = day.date
+                        monthDate = day.date
+                    } label: {
+                        VStack(spacing: 2) {
+                            Text("\(day.number)")
+                                .font(.system(size: 13, weight: day.isSelected ? .bold : .semibold, design: .rounded))
+                                .foregroundStyle(day.isInMonth ? Color.primary : Color.secondary.opacity(0.45))
+                            HStack(spacing: 1.5) {
+                                ForEach(Array(day.eventColors.enumerated()), id: \.offset) { _, color in
+                                    Circle()
+                                        .fill(color)
+                                        .frame(width: 4, height: 4)
                                 }
-                                .frame(height: 6)
                             }
-                            .frame(maxWidth: .infinity, minHeight: 34)
-                            .background(dayBackground(for: day))
-                            .overlay(dayBorder(for: day))
+                            .frame(height: 5)
                         }
-                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, minHeight: 28)
+                        .background(dayBackground(for: day))
+                        .overlay(dayBorder(for: day))
                     }
+                    .buttonStyle(.plain)
                 }
-
-                MonthBoundaryShape(firstDayOffset: leadingDays, numberOfDays: daysInVisibleMonth)
-                    .stroke(
-                        Color.primary.opacity(0.62),
-                        style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
-                    )
-                    .allowsHitTesting(false)
             }
 
-            HStack {
+            HStack(spacing: 8) {
                 Text("Selected")
-                    .font(.caption.weight(.semibold))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Text(selectedDateText)
                     .font(.caption.weight(.medium))
                 Spacer()
                 Text(selectedDateRelativeText)
-                    .font(.caption.weight(.medium))
+                    .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 2)
         }
-        .padding(12)
+        .padding(10)
         .background(Color.secondary.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var calendar: Calendar {
@@ -634,45 +615,6 @@ private struct MonthCalendarView: View {
     }
 }
 
-private struct MonthBoundaryShape: Shape {
-    let firstDayOffset: Int
-    let numberOfDays: Int
-
-    func path(in rect: CGRect) -> Path {
-        let occupied = Set(firstDayOffset..<(firstDayOffset + numberOfDays))
-        let columnWidth = rect.width / 7
-        let rowHeight = rect.height / 6
-        var path = Path()
-
-        for index in occupied {
-            let row = index / 7
-            let column = index % 7
-            let minX = CGFloat(column) * columnWidth
-            let maxX = minX + columnWidth
-            let minY = CGFloat(row) * rowHeight
-            let maxY = minY + rowHeight
-
-            if !occupied.contains(index - 7) {
-                path.move(to: CGPoint(x: minX, y: minY))
-                path.addLine(to: CGPoint(x: maxX, y: minY))
-            }
-            if !occupied.contains(index + 1) || column == 6 {
-                path.move(to: CGPoint(x: maxX, y: minY))
-                path.addLine(to: CGPoint(x: maxX, y: maxY))
-            }
-            if !occupied.contains(index + 7) {
-                path.move(to: CGPoint(x: maxX, y: maxY))
-                path.addLine(to: CGPoint(x: minX, y: maxY))
-            }
-            if !occupied.contains(index - 1) || column == 0 {
-                path.move(to: CGPoint(x: minX, y: maxY))
-                path.addLine(to: CGPoint(x: minX, y: minY))
-            }
-        }
-
-        return path
-    }
-}
 
 private struct CalendarDay: Identifiable {
     let id: Date

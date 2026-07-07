@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import QuartzCore
 import SwiftUI
 
 final class StatusBarController: NSObject {
@@ -8,6 +9,7 @@ final class StatusBarController: NSObject {
     private let model: AppModel
     private var timer: Timer?
     private var settingsCancellable: AnyCancellable?
+    private var currentStatusClockID: String?
     private lazy var dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -41,14 +43,16 @@ final class StatusBarController: NSObject {
     private func configureStatusItem() {
         guard let button = statusItem.button else { return }
         button.target = self
-        button.action = #selector(togglePopover)
+        button.action = #selector(handleStatusItemClick(_:))
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        button.wantsLayer = true
         button.imagePosition = .imageLeading
         button.toolTip = "TouchMacer Clock"
     }
 
     private func configurePopover() {
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 460, height: 760)
+        popover.contentSize = NSSize(width: 460, height: 700)
         let hostingController = NSHostingController(rootView: StatusPopoverView(model: model))
         hostingController.view.appearance = NSApp.appearance
         popover.contentViewController = hostingController
@@ -72,20 +76,14 @@ final class StatusBarController: NSObject {
 
     private func refreshClockTitle() {
         popover.contentViewController?.view.appearance = NSApp.appearance
+        let now = Date()
         let clocks = model.settings.clockTimeZones
-        let visibleClocks = Array(clocks.prefix(3))
+        let clock = model.settings.statusBarClock(at: now)
         let attributedTitle = NSMutableAttributedString(string: " ")
-        for (index, clock) in visibleClocks.enumerated() {
-            if index > 0 {
-                attributedTitle.append(NSAttributedString(string: "  •  ", attributes: baseTitleAttributes))
-            }
-            appendClock(clock, includeLabel: clocks.count > 1, to: attributedTitle)
-        }
-        if clocks.count > visibleClocks.count {
-            attributedTitle.append(NSAttributedString(string: "  +\(clocks.count - visibleClocks.count)", attributes: baseTitleAttributes))
-        }
+        appendClock(clock, at: now, includeLabel: clocks.count > 1, to: attributedTitle)
         attributedTitle.append(NSAttributedString(string: " ", attributes: baseTitleAttributes))
-        statusItem.button?.attributedTitle = attributedTitle
+        let shouldAnimate = currentStatusClockID != nil && currentStatusClockID != clock.id
+        applyStatusTitle(attributedTitle, clockID: clock.id, animated: shouldAnimate)
     }
 
     private var baseTitleAttributes: [NSAttributedString.Key: Any] {
@@ -105,56 +103,85 @@ final class StatusBarController: NSObject {
             .baselineOffset: -1.5
         ]
     }
-    private func appendClock(_ clock: ClockTimeZone, includeLabel: Bool, to attributedTitle: NSMutableAttributedString) {
-        dateFormatter.timeZone = clock.timeZone
-        timeFormatter.timeZone = clock.timeZone
-        if includeLabel {
-            attributedTitle.append(NSAttributedString(string: "\(clock.statusBarTitle) ", attributes: baseTitleAttributes))
+
+    private func applyStatusTitle(_ attributedTitle: NSAttributedString, clockID: String, animated: Bool) {
+        guard let button = statusItem.button else { return }
+        guard animated, let layer = button.layer else {
+            button.attributedTitle = attributedTitle
+            currentStatusClockID = clockID
+            return
         }
-        let dateText = dateFormatter.string(from: Date())
-        attributedTitle.append(dateCapsuleString(dateText))
-        attributedTitle.append(NSAttributedString(string: " \(timeFormatter.string(from: Date()))", attributes: timeTitleAttributes))
+
+        let transition = CATransition()
+        transition.type = .push
+        transition.subtype = .fromBottom
+        transition.duration = 0.34
+        transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(transition, forKey: "statusClockSwitch")
+        button.attributedTitle = attributedTitle
+        currentStatusClockID = clockID
     }
 
-    private func dateCapsuleString(_ text: String) -> NSAttributedString {
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .semibold)
-        let horizontalPadding: CGFloat = 5
-        let verticalPadding: CGFloat = 2
-        let palette = dateCapsulePalette
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: palette.text,
+    private func appendClock(_ clock: ClockTimeZone, at date: Date, includeLabel: Bool, to attributedTitle: NSMutableAttributedString) {
+        dateFormatter.timeZone = clock.timeZone
+        timeFormatter.timeZone = clock.timeZone
+        let dateText = dateFormatter.string(from: date)
+        let flagText = includeLabel ? clock.flag : nil
+        attributedTitle.append(dateCapsuleString(dateText, flag: flagText))
+        attributedTitle.append(NSAttributedString(string: " \(timeFormatter.string(from: date))", attributes: timeTitleAttributes))
+    }
+
+    private func dateCapsuleString(_ text: String, flag: String?) -> NSAttributedString {
+        let dateFont = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .semibold)
+        let flagFont = NSFont.systemFont(ofSize: 9.0, weight: .regular)
+        let horizontalPadding: CGFloat = 6
+        let verticalPadding: CGFloat = 2.5
+        let flagSpacing: CGFloat = flag == nil ? 0 : 3
+        let dateAttributes: [NSAttributedString.Key: Any] = [
+            .font: dateFont,
+            .foregroundColor: NSColor.black,
             .kern: -0.2
         ]
-        let textSize = (text as NSString).size(withAttributes: attributes)
+        let flagAttributes: [NSAttributedString.Key: Any] = [
+            .font: flagFont
+        ]
+        let flagSize = flag.map { ($0 as NSString).size(withAttributes: flagAttributes) } ?? .zero
+        let textSize = (text as NSString).size(withAttributes: dateAttributes)
         let imageSize = NSSize(
-            width: ceil(textSize.width + horizontalPadding * 2),
+            width: ceil(flagSize.width + flagSpacing + textSize.width + horizontalPadding * 2),
             height: ceil(textSize.height + verticalPadding * 2)
         )
         let image = NSImage(size: imageSize)
         image.lockFocus()
-        let capsulePath = NSBezierPath(roundedRect: NSRect(x: 0.75, y: 0.75, width: imageSize.width - 1.5, height: imageSize.height - 1.5), xRadius: 4, yRadius: 4)
-        capsulePath.lineWidth = 1.5
-        palette.stroke.setStroke()
-        capsulePath.stroke()
-        (text as NSString).draw(
-            at: NSPoint(x: horizontalPadding, y: verticalPadding - 0.5),
-            withAttributes: attributes
-        )
+        let capsuleRect = NSRect(origin: .zero, size: imageSize)
+        NSColor.white.withAlphaComponent(isDarkAppearanceActive ? 0.92 : 0.82).setFill()
+        NSBezierPath(roundedRect: capsuleRect, xRadius: 5, yRadius: 5).fill()
+
+        var drawX = horizontalPadding
+        if let flag {
+            (flag as NSString).draw(
+                at: NSPoint(x: drawX, y: verticalPadding + 0.5),
+                withAttributes: flagAttributes
+            )
+            drawX += flagSize.width + flagSpacing
+        }
+
+        if let context = NSGraphicsContext.current {
+            context.saveGraphicsState()
+            context.compositingOperation = .clear
+            (text as NSString).draw(
+                at: NSPoint(x: drawX, y: verticalPadding - 0.5),
+                withAttributes: dateAttributes
+            )
+            context.restoreGraphicsState()
+        }
         image.unlockFocus()
 
         let attachment = NSTextAttachment()
         attachment.image = image
-        let baselineOffset = round((font.capHeight - imageSize.height) / 2) - 1.5
+        let baselineOffset = round((dateFont.capHeight - imageSize.height) / 2) - 1.5
         attachment.bounds = NSRect(x: 0, y: baselineOffset, width: imageSize.width, height: imageSize.height)
         return NSAttributedString(attachment: attachment)
-    }
-
-    private var dateCapsulePalette: (stroke: NSColor, text: NSColor) {
-        if isDarkAppearanceActive {
-            return (NSColor.white.withAlphaComponent(0.72), NSColor.white)
-        }
-        return (NSColor.black.withAlphaComponent(0.66), NSColor.black)
     }
 
     private var isDarkAppearanceActive: Bool {
@@ -171,15 +198,54 @@ final class StatusBarController: NSObject {
         }
     }
 
-    @objc private func togglePopover() {
-        guard let button = statusItem.button else { return }
+    @objc private func handleStatusItemClick(_ sender: NSStatusBarButton) {
+        switch NSApp.currentEvent?.type {
+        case .rightMouseDown, .rightMouseUp:
+            showPageMenu(relativeTo: sender)
+        default:
+            togglePopover()
+        }
+    }
+
+    private func showPageMenu(relativeTo button: NSStatusBarButton) {
+        let menu = NSMenu()
+        let headerItem = NSMenuItem(title: "Page", action: nil, keyEquivalent: "")
+        headerItem.isEnabled = false
+        menu.addItem(headerItem)
+
+        for page in PopoverPage.allCases {
+            let item = NSMenuItem(title: page.title, action: #selector(selectPageFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = page.rawValue
+            item.state = model.selectedPage == page ? .on : .off
+            menu.addItem(item)
+        }
+
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 2), in: button)
+    }
+
+    @objc private func selectPageFromMenu(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let page = PopoverPage(rawValue: rawValue) else { return }
+        model.selectedPage = page
+        showPopover()
+    }
+
+    private func togglePopover() {
         if popover.isShown {
             popover.performClose(nil)
         } else {
-            model.refreshCalendarData()
-            refreshClockTitle()
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            NSApp.activate(ignoringOtherApps: true)
+            showPopover()
         }
+    }
+
+    private func showPopover() {
+        guard let button = statusItem.button else { return }
+        model.refreshCalendarData()
+        refreshClockTitle()
+        if !popover.isShown {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
+        NSApp.activate(ignoringOtherApps: true)
     }
 }

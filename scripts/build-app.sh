@@ -43,6 +43,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
     <string>TouchMacer shows upcoming events from the calendars you select.</string>
     <key>NSCalendarsUsageDescription</key>
     <string>TouchMacer shows upcoming events from the calendars you select.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>TouchMacer can switch macOS Light/Dark appearance when you enable system appearance automation.</string>
 </dict>
 </plist>
 PLIST

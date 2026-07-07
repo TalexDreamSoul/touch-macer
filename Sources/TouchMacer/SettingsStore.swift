@@ -6,8 +6,10 @@ final class SettingsStore {
         static let customDisplayTimeZoneID = "customDisplayTimeZoneID"
         static let showsSystemTimeZone = "showsSystemTimeZone"
         static let selectedTimeZoneIDs = "selectedTimeZoneIDs"
+        static let statusBarSwitchIntervalSeconds = "statusBarSwitchIntervalSeconds"
         static let appearanceMode = "appearanceMode"
         static let appearanceTimeZoneID = "appearanceTimeZoneID"
+        static let appliesSystemAppearance = "appliesSystemAppearance"
         static let overviewTimeZoneID = "overviewTimeZoneID"
         static let calendarSelectionMode = "calendarSelectionMode"
         static let selectedCalendarIDs = "selectedCalendarIDs"
@@ -29,13 +31,16 @@ final class SettingsStore {
             systemTimeZoneID: systemTimeZoneID
         )
 
+        let statusBarSwitchIntervalSeconds = loadStatusBarSwitchIntervalSeconds(defaultValue: 5)
         return AppSettings(
             displayTimeZoneMode: legacyMode,
             customDisplayTimeZoneID: legacyCustomTimeZoneID,
             showsSystemTimeZone: loadShowsSystemTimeZone(defaultValue: true),
             selectedTimeZoneIDs: selectedTimeZoneIDs,
+            statusBarSwitchIntervalSeconds: statusBarSwitchIntervalSeconds,
             appearanceMode: AppearanceMode(rawValue: defaults.string(forKey: Key.appearanceMode) ?? "") ?? .system,
             appearanceTimeZoneID: defaults.string(forKey: Key.appearanceTimeZoneID) ?? systemTimeZoneID,
+            appliesSystemAppearance: defaults.bool(forKey: Key.appliesSystemAppearance),
             overviewTimeZoneID: defaults.string(forKey: Key.overviewTimeZoneID) ?? systemTimeZoneID,
             calendarSelectionMode: CalendarSelectionMode(rawValue: defaults.string(forKey: Key.calendarSelectionMode) ?? "") ?? .all,
             selectedCalendarIDs: Set(defaults.stringArray(forKey: Key.selectedCalendarIDs) ?? [])
@@ -47,8 +52,10 @@ final class SettingsStore {
         defaults.set(settings.customDisplayTimeZoneID, forKey: Key.customDisplayTimeZoneID)
         defaults.set(settings.showsSystemTimeZone, forKey: Key.showsSystemTimeZone)
         defaults.set(settings.selectedTimeZoneIDs, forKey: Key.selectedTimeZoneIDs)
+        defaults.set(settings.statusBarSwitchIntervalSeconds, forKey: Key.statusBarSwitchIntervalSeconds)
         defaults.set(settings.appearanceMode.rawValue, forKey: Key.appearanceMode)
         defaults.set(settings.appearanceTimeZoneID, forKey: Key.appearanceTimeZoneID)
+        defaults.set(settings.appliesSystemAppearance, forKey: Key.appliesSystemAppearance)
         defaults.set(settings.overviewTimeZoneID, forKey: Key.overviewTimeZoneID)
         defaults.set(settings.calendarSelectionMode.rawValue, forKey: Key.calendarSelectionMode)
         defaults.set(Array(settings.selectedCalendarIDs).sorted(), forKey: Key.selectedCalendarIDs)
@@ -57,6 +64,11 @@ final class SettingsStore {
     private func loadShowsSystemTimeZone(defaultValue: Bool) -> Bool {
         guard defaults.object(forKey: Key.showsSystemTimeZone) != nil else { return defaultValue }
         return defaults.bool(forKey: Key.showsSystemTimeZone)
+    }
+
+    private func loadStatusBarSwitchIntervalSeconds(defaultValue: TimeInterval) -> TimeInterval {
+        guard defaults.object(forKey: Key.statusBarSwitchIntervalSeconds) != nil else { return defaultValue }
+        return min(30, max(2, defaults.double(forKey: Key.statusBarSwitchIntervalSeconds)))
     }
 
     private func defaultSelectedTimeZoneIDs(

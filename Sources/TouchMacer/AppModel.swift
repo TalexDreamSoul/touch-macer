@@ -3,6 +3,7 @@ import Foundation
 
 final class AppModel: ObservableObject {
     @Published private(set) var settings: AppSettings
+    @Published var selectedPage: PopoverPage = .overview
     @Published private(set) var authorizationState: CalendarAuthorizationState
     @Published private(set) var calendars: [CalendarInfo] = []
     @Published private(set) var events: [CalendarEventInfo] = []
