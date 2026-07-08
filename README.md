@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://ld.xh.do/ld-badge.svg" alt="认可 linux.do" width="480">
+</p>
+
 # TouchMacer
 
 TouchMacer is a native macOS status bar clock app built with AppKit, SwiftUI, EventKit, and Foundation.
