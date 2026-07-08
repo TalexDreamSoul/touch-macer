@@ -1,3 +1,5 @@
+import AppKit
+import Foundation
 import SwiftUI
 
 private let eventAccentPalette: [Color] = [.orange, .purple, .blue, .green, .pink]
@@ -25,6 +27,7 @@ struct StatusPopoverView: View {
         overviewView
             .padding(18)
             .frame(width: 280, height: 560, alignment: .topLeading)
+            .background(Color(nsColor: .windowBackgroundColor))
             .sheet(isPresented: quickEventSheetBinding) {
                 quickEventSheet
             }
@@ -276,46 +279,120 @@ private struct QuickEventEditor: View {
 
 struct SettingsWindowView: View {
     @ObservedObject var model: AppModel
+    @State private var selectedPane: SettingsPane = .dateAndEvents
 
     var body: some View {
-        SettingsContentView(model: model)
-            .padding(20)
-            .frame(minWidth: 420, idealWidth: 480, minHeight: 520, idealHeight: 640, alignment: .topLeading)
+        NavigationSplitView {
+            List(SettingsPane.allCases, selection: $selectedPane) { pane in
+                Label(pane.title, systemImage: pane.systemImage)
+                    .tag(pane)
+            }
+            .listStyle(.sidebar)
+            .navigationTitle("Settings")
+            .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 220)
+        } detail: {
+            SettingsContentView(model: model, pane: selectedPane)
+        }
+        .frame(minWidth: 700, idealWidth: 760, minHeight: 520, idealHeight: 640, alignment: .topLeading)
+    }
+}
+
+private enum SettingsPane: String, CaseIterable, Identifiable {
+    case dateAndEvents
+    case menuBarTimeZones
+    case appearance
+    case calendars
+    case about
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .dateAndEvents: return "Date & Events"
+        case .menuBarTimeZones: return "Menu Bar"
+        case .appearance: return "Appearance"
+        case .calendars: return "Calendars"
+        case .about: return "About"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .dateAndEvents:
+            return "Calendar display, overview time zone, and week layout."
+        case .menuBarTimeZones:
+            return "Status item clocks and rotation behavior."
+        case .appearance:
+            return "App appearance and optional macOS Light/Dark automation."
+        case .calendars:
+            return "Calendar permissions and event sources."
+        case .about:
+            return "Version, GitHub releases, and project links."
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .dateAndEvents: return "calendar"
+        case .menuBarTimeZones: return "menubar.rectangle"
+        case .appearance: return "circle.lefthalf.filled"
+        case .calendars: return "calendar.badge.clock"
+        case .about: return "info.circle"
+        }
     }
 }
 
 private struct SettingsContentView: View {
     @ObservedObject var model: AppModel
+    let pane: SettingsPane
     @State private var pendingTimeZoneID = TimeZone.autoupdatingCurrent.identifier
+    @State private var isCheckingForUpdates = false
+    @State private var updateCheckMessage = "Check GitHub releases for a newer build."
+    @State private var latestReleaseURL: URL?
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                overviewSettingsSection
-                Divider()
-                timeZoneSettingsSection
-                Divider()
-                appearanceSection
-                Divider()
-                calendarSection
+            VStack(alignment: .leading, spacing: 22) {
+                SettingsPaneHeader(pane: pane)
+                selectedPaneContent
             }
+            .padding(28)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    @ViewBuilder
+    private var selectedPaneContent: some View {
+        switch pane {
+        case .dateAndEvents:
+            overviewSettingsSection
+        case .menuBarTimeZones:
+            timeZoneSettingsSection
+        case .appearance:
+            appearanceSection
+        case .calendars:
+            calendarSection
+        case .about:
+            aboutSection
         }
     }
 
     private var overviewSettingsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Date & Events")
-                .font(.headline)
+        SettingsGroup {
             TimeZonePicker(
                 title: "Display time zone",
                 selection: binding(\.overviewTimeZoneID)
             )
+            .frame(maxWidth: 460)
+
             Picker("Week starts", selection: binding(\.calendarWeekStartDay)) {
                 ForEach(WeekStartDay.allCases) { day in
                     Text(day.title).tag(day)
                 }
             }
+            .frame(maxWidth: 250)
+
             Text("Month view and week numbers use this start day.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -323,10 +400,7 @@ private struct SettingsContentView: View {
     }
 
     private var timeZoneSettingsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Menu Bar Time Zones")
-                .font(.headline)
-
+        SettingsGroup(spacing: 14) {
             Toggle("Show system time zone", isOn: binding(\.showsSystemTimeZone))
 
             Stepper(
@@ -349,6 +423,7 @@ private struct SettingsContentView: View {
                         HStack(spacing: 10) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(clock.title)
+                                    .font(.body)
                                 Text(clock.subtitle)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -361,9 +436,11 @@ private struct SettingsContentView: View {
                     }
                 }
             }
+            .padding(.top, 4)
 
-            HStack {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 TimeZonePicker(title: "Add", selection: $pendingTimeZoneID)
+                    .frame(maxWidth: 420)
                 Button("Add") {
                     model.addTimeZone(identifier: pendingTimeZoneID)
                 }
@@ -377,20 +454,20 @@ private struct SettingsContentView: View {
     }
 
     private var appearanceSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Appearance")
-                .font(.headline)
+        SettingsGroup(spacing: 14) {
             Picker("Appearance", selection: binding(\.appearanceMode)) {
                 ForEach(AppearanceMode.allCases) { mode in
                     Text(mode.title).tag(mode)
                 }
             }
+            .frame(maxWidth: 320)
 
             if model.settings.appearanceMode == .automaticByTimeZone {
                 TimeZonePicker(
                     title: "Auto reference",
                     selection: binding(\.appearanceTimeZoneID)
                 )
+                .frame(maxWidth: 460)
                 Text("Auto uses light from 07:00-19:00 in the selected time zone.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -405,14 +482,12 @@ private struct SettingsContentView: View {
     }
 
     private var calendarSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        SettingsGroup(spacing: 12) {
             HStack {
-                Text("Calendars")
-                    .font(.headline)
-                Spacer()
                 Button("Refresh") {
                     model.refreshCalendarData()
                 }
+                Spacer()
             }
 
             Text(model.authorizationState.title)
@@ -437,9 +512,59 @@ private struct SettingsContentView: View {
                         Text(mode.title).tag(mode)
                     }
                 }
+                .frame(maxWidth: 320)
 
                 if model.settings.calendarSelectionMode == .custom {
                     calendarSelectionList
+                }
+            }
+        }
+    }
+
+    private var aboutSection: some View {
+        SettingsGroup(spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("TouchMacer")
+                    .font(.title2.weight(.semibold))
+                Text("Version \(appVersion)")
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Updates")
+                    .font(.headline)
+                Text(updateCheckMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    Button(isCheckingForUpdates ? "Checking..." : "Check GitHub Updates") {
+                        checkForGitHubUpdates()
+                    }
+                    .disabled(isCheckingForUpdates)
+
+                    if let latestReleaseURL {
+                        Button("Open Latest Release") {
+                            NSWorkspace.shared.open(latestReleaseURL)
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Links")
+                    .font(.headline)
+                HStack(spacing: 10) {
+                    Button("GitHub Repository") {
+                        openURL("https://github.com/TalexDreamSoul/touch-macer")
+                    }
+                    Button("Release Notes") {
+                        openURL("https://github.com/TalexDreamSoul/touch-macer/releases")
+                    }
                 }
             }
         }
@@ -470,6 +595,10 @@ private struct SettingsContentView: View {
         return !(model.settings.showsSystemTimeZone && pendingTimeZoneID == TimeZone.autoupdatingCurrent.identifier)
     }
 
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.2"
+    }
+
     private func binding<Value>(_ keyPath: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {
         Binding(
             get: { model.settings[keyPath: keyPath] },
@@ -494,6 +623,118 @@ private struct SettingsContentView: View {
                 }
             }
         )
+    }
+
+    private func checkForGitHubUpdates() {
+        isCheckingForUpdates = true
+        updateCheckMessage = "Checking GitHub releases..."
+        latestReleaseURL = nil
+
+        Task {
+            let result = await GitHubReleaseChecker.check(currentVersion: appVersion)
+            await MainActor.run {
+                isCheckingForUpdates = false
+                updateCheckMessage = result.message
+                latestReleaseURL = result.releaseURL
+            }
+        }
+    }
+
+    private func openURL(_ urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        NSWorkspace.shared.open(url)
+    }
+}
+
+private struct SettingsPaneHeader: View {
+    let pane: SettingsPane
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label(pane.title, systemImage: pane.systemImage)
+                .font(.title2.weight(.semibold))
+            Text(pane.subtitle)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+private struct SettingsGroup<Content: View>: View {
+    let spacing: CGFloat
+    @ViewBuilder let content: Content
+
+    init(spacing: CGFloat = 10, @ViewBuilder content: () -> Content) {
+        self.spacing = spacing
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            content
+        }
+        .frame(maxWidth: 560, alignment: .leading)
+    }
+}
+
+private struct GitHubUpdateResult {
+    let message: String
+    let releaseURL: URL?
+}
+
+private struct GitHubRelease: Decodable {
+    let tagName: String
+    let htmlURL: String
+
+    private enum CodingKeys: String, CodingKey {
+        case tagName = "tag_name"
+        case htmlURL = "html_url"
+    }
+}
+
+private enum GitHubReleaseChecker {
+    static func check(currentVersion: String) async -> GitHubUpdateResult {
+        guard let url = URL(string: "https://api.github.com/repos/TalexDreamSoul/touch-macer/releases/latest") else {
+            return GitHubUpdateResult(message: "GitHub releases URL is invalid.", releaseURL: nil)
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return GitHubUpdateResult(message: "GitHub returned an unreadable response.", releaseURL: nil)
+            }
+
+            if httpResponse.statusCode == 404 {
+                return GitHubUpdateResult(message: "No GitHub releases are published yet.", releaseURL: nil)
+            }
+
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                return GitHubUpdateResult(message: "GitHub update check failed with HTTP \(httpResponse.statusCode).", releaseURL: nil)
+            }
+
+            let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
+            let latestVersion = normalizedVersion(release.tagName)
+            let current = normalizedVersion(currentVersion)
+            let releaseURL = URL(string: release.htmlURL)
+
+            if latestVersion.compare(current, options: .numeric) == .orderedDescending {
+                return GitHubUpdateResult(message: "Version \(latestVersion) is available on GitHub.", releaseURL: releaseURL)
+            }
+
+            return GitHubUpdateResult(message: "TouchMacer is up to date. Latest release: \(latestVersion).", releaseURL: releaseURL)
+        } catch {
+            return GitHubUpdateResult(message: "GitHub update check failed: \(error.localizedDescription)", releaseURL: nil)
+        }
+    }
+
+    private static func normalizedVersion(_ version: String) -> String {
+        String(version.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingPrefix("v")
+            .trimmingPrefix("V"))
     }
 }
 
@@ -526,10 +767,10 @@ private struct ClockCard: View {
             }
         }
         .padding(7)
-        .background(Color.purple.opacity(0.08))
+        .background(Color(nsColor: .controlBackgroundColor))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.purple.opacity(0.18), lineWidth: 1)
+                .stroke(Color.primary.opacity(0.10), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }

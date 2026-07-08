@@ -330,8 +330,9 @@ final class StatusBarController: NSObject {
         let window = NSWindow(contentViewController: hostingController)
         window.title = "TouchMacer Settings"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 480, height: 640))
-        window.minSize = NSSize(width: 420, height: 520)
+        window.setContentSize(NSSize(width: 760, height: 640))
+        window.minSize = NSSize(width: 700, height: 520)
+        window.toolbarStyle = .preference
         window.isReleasedWhenClosed = false
         window.center()
         window.setFrameAutosaveName("TouchMacerSettingsWindow")
