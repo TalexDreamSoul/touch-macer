@@ -18,6 +18,14 @@ TouchMacer is a native macOS status bar clock app built with AppKit, SwiftUI, Ev
 - Packaged macOS app icon for Finder, the Dock, and system Login Items.
 - Local settings persistence through `UserDefaults`.
 
+## Install with Homebrew
+
+```bash
+brew install --cask talexdreamsoul/tap/touchmacer
+```
+
+The current release is ad-hoc signed and not notarized. If macOS blocks the first launch, open **System Settings → Privacy & Security** and choose **Open Anyway** for TouchMacer.
+
 ## Build
 
 ```bash
