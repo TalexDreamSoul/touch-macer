@@ -7,19 +7,25 @@ final class AppModel: ObservableObject {
     @Published private(set) var calendars: [CalendarInfo] = []
     @Published private(set) var events: [CalendarEventInfo] = []
     @Published var errorMessage: String?
+    @Published private(set) var launchAtLoginState: LaunchAtLoginState
+    @Published var launchAtLoginErrorMessage: String?
 
     private let settingsStore: SettingsStore
     private let calendarService: CalendarService
     private let appearanceService: AppearanceService
+    private let launchAtLoginService: LaunchAtLoginManaging
 
     init(
         settingsStore: SettingsStore,
         calendarService: CalendarService,
-        appearanceService: AppearanceService
+        appearanceService: AppearanceService,
+        launchAtLoginService: LaunchAtLoginManaging = LaunchAtLoginService()
     ) {
         self.settingsStore = settingsStore
         self.calendarService = calendarService
         self.appearanceService = appearanceService
+        self.launchAtLoginService = launchAtLoginService
+        self.launchAtLoginState = launchAtLoginService.state
         self.settings = settingsStore.load()
         self.authorizationState = calendarService.authorizationState
         appearanceService.apply(settings: settings)
@@ -33,6 +39,24 @@ final class AppModel: ObservableObject {
         settingsStore.save(nextSettings)
         appearanceService.apply(settings: nextSettings)
         refreshEventsIfPossible()
+    }
+
+    func setLaunchAtLoginEnabled(_ enabled: Bool) {
+        do {
+            try launchAtLoginService.setEnabled(enabled)
+            launchAtLoginErrorMessage = nil
+        } catch {
+            launchAtLoginErrorMessage = error.localizedDescription
+        }
+        refreshLaunchAtLoginState()
+    }
+
+    func refreshLaunchAtLoginState() {
+        launchAtLoginState = launchAtLoginService.state
+    }
+
+    func openLoginItemsSettings() {
+        launchAtLoginService.openSystemSettings()
     }
 
     func addTimeZone(identifier: String) {

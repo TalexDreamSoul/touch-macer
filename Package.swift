@@ -14,6 +14,7 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("EventKit"),
+                .linkedFramework("ServiceManagement"),
                 .linkedFramework("SwiftUI")
             ]
         ),

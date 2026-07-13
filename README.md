@@ -14,6 +14,8 @@ TouchMacer is a native macOS status bar clock app built with AppKit, SwiftUI, Ev
 - EventKit Calendar integration for iCloud/local calendars configured in macOS Calendar.
 - Calendar picker for all calendars or selected calendars.
 - Appearance modes: system, light, dark, or automatic by a selected time zone, with an optional switch to apply the result to macOS system Light/Dark appearance.
+- Native Launch at Login control through macOS Service Management.
+- Packaged macOS app icon for Finder, the Dock, and system Login Items.
 - Local settings persistence through `UserDefaults`.
 
 ## Build
@@ -24,7 +26,7 @@ swift build
 
 ## Build App Bundle
 
-Calendar permission prompts require usage descriptions in an app bundle. Use:
+Calendar permissions, the packaged icon, and Launch at Login require the app bundle. Use:
 
 ```bash
 chmod +x scripts/build-app.sh

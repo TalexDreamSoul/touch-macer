@@ -533,6 +533,43 @@ private struct SettingsContentView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 8) {
+                Text("Startup")
+                    .font(.headline)
+                Toggle("Launch TouchMacer at login", isOn: launchAtLoginBinding)
+                    .disabled(model.launchAtLoginState == .unavailable)
+
+                switch model.launchAtLoginState {
+                case .disabled:
+                    Text("TouchMacer starts only when you open it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                case .enabled:
+                    Text("TouchMacer will start automatically after you sign in.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                case .requiresApproval:
+                    Text("macOS requires approval before TouchMacer can start at login.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    Button("Open Login Items Settings") {
+                        model.openLoginItemsSettings()
+                    }
+                case .unavailable:
+                    Text("Launch at Login is available when TouchMacer runs from its app bundle.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let errorMessage = model.launchAtLoginErrorMessage, !errorMessage.isEmpty {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Updates")
                     .font(.headline)
                 Text(updateCheckMessage)
@@ -568,6 +605,9 @@ private struct SettingsContentView: View {
                 }
             }
         }
+        .onAppear {
+            model.refreshLaunchAtLoginState()
+        }
     }
 
     private var calendarSelectionList: some View {
@@ -595,8 +635,15 @@ private struct SettingsContentView: View {
         return !(model.settings.showsSystemTimeZone && pendingTimeZoneID == TimeZone.autoupdatingCurrent.identifier)
     }
 
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { model.launchAtLoginState.isRegistered },
+            set: { model.setLaunchAtLoginEnabled($0) }
+        )
+    }
+
     private var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.2"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.3"
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {
