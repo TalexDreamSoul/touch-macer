@@ -19,6 +19,7 @@ private func eventAccentColor(for event: CalendarEventInfo) -> Color {
 struct StatusPopoverView: View {
     @ObservedObject var model: AppModel
     let openSettings: () -> Void
+    let openQuickActions: () -> Void
     @State private var visibleMonthDate = Date()
     @State private var selectedCalendarDate = Date()
     @State private var quickEventDraft: QuickEventDraft?
@@ -26,7 +27,7 @@ struct StatusPopoverView: View {
     var body: some View {
         overviewView
             .padding(18)
-            .frame(width: 280, height: 560, alignment: .topLeading)
+            .frame(width: 320, height: 680, alignment: .topLeading)
             .background(Color(nsColor: .windowBackgroundColor))
             .sheet(isPresented: quickEventSheetBinding) {
                 quickEventSheet
@@ -37,6 +38,7 @@ struct StatusPopoverView: View {
         TimelineView(.periodic(from: Date(), by: 1)) { context in
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    QuickActionGrid(model: model, openMore: openQuickActions)
                     clockSection(date: context.date)
                     MonthCalendarView(
                         monthDate: $visibleMonthDate,
@@ -44,6 +46,10 @@ struct StatusPopoverView: View {
                         events: model.events,
                         timeZone: model.settings.overviewTimeZone,
                         weekStartDay: model.settings.calendarWeekStartDay
+                    )
+                    DailyGuideCard(
+                        date: selectedCalendarDate,
+                        timeZone: model.settings.overviewTimeZone
                     )
                     eventsSection
                 }
@@ -137,6 +143,98 @@ struct StatusPopoverView: View {
             return
         }
         quickEventDraft = model.quickEventDraft(startDate: selectedCalendarDate)
+    }
+}
+
+private struct DailyGuide {
+    let favorable: [String]
+    let unfavorable: [String]
+
+    private static let favorableActivities = [
+        "专注", "计划", "学习", "会友", "出行", "运动",
+        "整理", "创作", "沟通", "休息", "复盘", "开始"
+    ]
+    private static let unfavorableActivities = [
+        "拖延", "熬夜", "冲动消费", "过度承诺", "仓促决定",
+        "争执", "冒险", "久坐", "分心", "强求结果"
+    ]
+
+    static func make(for date: Date, timeZone: TimeZone) -> DailyGuide {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        let seed = (components.year ?? 0) * 372
+            + (components.month ?? 0) * 31
+            + (components.day ?? 0)
+
+        return DailyGuide(
+            favorable: picks(from: favorableActivities, count: 3, seed: seed, step: 5),
+            unfavorable: picks(from: unfavorableActivities, count: 2, seed: seed * 7 + 3, step: 3)
+        )
+    }
+
+    private static func picks(
+        from activities: [String],
+        count: Int,
+        seed: Int,
+        step: Int
+    ) -> [String] {
+        guard !activities.isEmpty else { return [] }
+        let start = ((seed % activities.count) + activities.count) % activities.count
+        return (0..<min(count, activities.count)).map { offset in
+            activities[(start + offset * step) % activities.count]
+        }
+    }
+}
+
+private struct DailyGuideCard: View {
+    let date: Date
+    let timeZone: TimeZone
+
+    var body: some View {
+        let guide = DailyGuide.make(for: date, timeZone: timeZone)
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Daily Guide")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(dateText)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            guideRow(label: "宜", color: .green, activities: guide.favorable)
+            guideRow(label: "忌", color: .red, activities: guide.unfavorable)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .help("A light daily guide generated on-device for the selected date.")
+    }
+
+    private func guideRow(label: String, color: Color, activities: [String]) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(color)
+                .frame(width: 24, height: 20)
+                .background(color.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            Text(activities.joined(separator: " · "))
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+    }
+
+    private var dateText: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "MMM d"
+        return formatter.string(from: date)
     }
 }
 
@@ -279,7 +377,12 @@ private struct QuickEventEditor: View {
 
 struct SettingsWindowView: View {
     @ObservedObject var model: AppModel
-    @State private var selectedPane: SettingsPane = .dateAndEvents
+    @State private var selectedPane: SettingsPane
+
+    init(model: AppModel, initialPane: SettingsPane = .dateAndEvents) {
+        self.model = model
+        self._selectedPane = State(initialValue: initialPane)
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -297,8 +400,9 @@ struct SettingsWindowView: View {
     }
 }
 
-private enum SettingsPane: String, CaseIterable, Identifiable {
+enum SettingsPane: String, CaseIterable, Identifiable {
     case dateAndEvents
+    case quickActions
     case menuBarTimeZones
     case appearance
     case calendars
@@ -309,6 +413,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .dateAndEvents: return "Date & Events"
+        case .quickActions: return "Quick Actions"
         case .menuBarTimeZones: return "Menu Bar"
         case .appearance: return "Appearance"
         case .calendars: return "Calendars"
@@ -320,6 +425,8 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .dateAndEvents:
             return "Calendar display, overview time zone, and week layout."
+        case .quickActions:
+            return "Pinned actions, ordering, availability, and Apple Shortcuts."
         case .menuBarTimeZones:
             return "Status item clocks and rotation behavior."
         case .appearance:
@@ -334,6 +441,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .dateAndEvents: return "calendar"
+        case .quickActions: return "square.grid.2x2"
         case .menuBarTimeZones: return "menubar.rectangle"
         case .appearance: return "circle.lefthalf.filled"
         case .calendars: return "calendar.badge.clock"
@@ -367,6 +475,8 @@ private struct SettingsContentView: View {
         switch pane {
         case .dateAndEvents:
             overviewSettingsSection
+        case .quickActions:
+            QuickActionSettingsView(model: model)
         case .menuBarTimeZones:
             timeZoneSettingsSection
         case .appearance:
@@ -643,7 +753,7 @@ private struct SettingsContentView: View {
     }
 
     private var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.3"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0"
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {
@@ -708,7 +818,7 @@ private struct SettingsPaneHeader: View {
     }
 }
 
-private struct SettingsGroup<Content: View>: View {
+struct SettingsGroup<Content: View>: View {
     let spacing: CGFloat
     @ViewBuilder let content: Content
 

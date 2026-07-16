@@ -9,6 +9,7 @@ final class AppModel: ObservableObject {
     @Published var errorMessage: String?
     @Published private(set) var launchAtLoginState: LaunchAtLoginState
     @Published var launchAtLoginErrorMessage: String?
+    let quickActionService: QuickActionService
 
     private let settingsStore: SettingsStore
     private let calendarService: CalendarService
@@ -19,12 +20,14 @@ final class AppModel: ObservableObject {
         settingsStore: SettingsStore,
         calendarService: CalendarService,
         appearanceService: AppearanceService,
-        launchAtLoginService: LaunchAtLoginManaging = LaunchAtLoginService()
+        launchAtLoginService: LaunchAtLoginManaging = LaunchAtLoginService(),
+        quickActionService: QuickActionService? = nil
     ) {
         self.settingsStore = settingsStore
         self.calendarService = calendarService
         self.appearanceService = appearanceService
         self.launchAtLoginService = launchAtLoginService
+        self.quickActionService = quickActionService ?? QuickActionService(appearanceService: appearanceService)
         self.launchAtLoginState = launchAtLoginService.state
         self.settings = settingsStore.load()
         self.authorizationState = calendarService.authorizationState
@@ -66,6 +69,30 @@ final class AppModel: ObservableObject {
             guard !settings.selectedTimeZoneIDs.contains(identifier) else { return }
             guard !(settings.showsSystemTimeZone && identifier == systemIdentifier) else { return }
             settings.selectedTimeZoneIDs.append(identifier)
+        }
+    }
+
+    func addPinnedQuickAction(_ reference: QuickActionReference) {
+        guard settings.pinnedQuickActions.count < 7 else { return }
+        guard !settings.pinnedQuickActions.contains(reference) else { return }
+        guard quickActionService.isAvailable(reference) else { return }
+        updateSettings { settings in
+            settings.pinnedQuickActions.append(reference)
+        }
+    }
+
+    func removePinnedQuickAction(_ reference: QuickActionReference) {
+        updateSettings { settings in
+            settings.pinnedQuickActions.removeAll { $0 == reference }
+        }
+    }
+
+    func movePinnedQuickAction(at index: Int, by offset: Int) {
+        let destination = index + offset
+        guard settings.pinnedQuickActions.indices.contains(index) else { return }
+        guard settings.pinnedQuickActions.indices.contains(destination) else { return }
+        updateSettings { settings in
+            settings.pinnedQuickActions.swapAt(index, destination)
         }
     }
 

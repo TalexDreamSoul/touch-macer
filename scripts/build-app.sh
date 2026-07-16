@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="TouchMacer"
 BUILD_CONFIG="${BUILD_CONFIG:-release}"
-APP_VERSION="0.1.3"
-BUILD_NUMBER="4"
+APP_VERSION="0.2.0"
+BUILD_NUMBER="5"
 ICON_SOURCE="$ROOT_DIR/assets/AppIcon.png"
 APP_DIR="$ROOT_DIR/.build/app/$APP_NAME.app"
 CONTENTS_DIR="$APP_DIR/Contents"
@@ -76,7 +76,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
     <key>NSCalendarsUsageDescription</key>
     <string>TouchMacer shows upcoming events from the calendars you select.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>TouchMacer can switch macOS Light/Dark appearance when you enable system appearance automation.</string>
+    <string>TouchMacer uses macOS Automation for system appearance and Quick Actions such as Lock Screen.</string>
 </dict>
 </plist>
 PLIST

@@ -13,6 +13,7 @@ let package = Package(
             path: "Sources/TouchMacer",
             linkerSettings: [
                 .linkedFramework("AppKit"),
+                .linkedFramework("ApplicationServices"),
                 .linkedFramework("EventKit"),
                 .linkedFramework("ServiceManagement"),
                 .linkedFramework("SwiftUI")

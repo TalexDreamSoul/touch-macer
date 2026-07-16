@@ -8,6 +8,7 @@ final class StatusBarController: NSObject {
     private let popover: NSPopover
     private let model: AppModel
     private var settingsWindow: NSWindow?
+    private var quickActionsWindow: NSWindow?
     private var quickEventWindow: NSWindow?
     private var timer: Timer?
     private var settingsCancellable: AnyCancellable?
@@ -55,11 +56,17 @@ final class StatusBarController: NSObject {
 
     private func configurePopover() {
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 280, height: 560)
+        popover.contentSize = NSSize(width: 320, height: 680)
         let hostingController = NSHostingController(
-            rootView: StatusPopoverView(model: model, openSettings: { [weak self] in
-                self?.showSettingsWindow()
-            })
+            rootView: StatusPopoverView(
+                model: model,
+                openSettings: { [weak self] in
+                    self?.showSettingsWindow()
+                },
+                openQuickActions: { [weak self] in
+                    self?.showQuickActionsWindow()
+                }
+            )
         )
         hostingController.view.appearance = NSApp.appearance
         popover.contentViewController = hostingController
@@ -307,15 +314,21 @@ final class StatusBarController: NSObject {
         NSApp.terminate(nil)
     }
 
-    private func showSettingsWindow() {
+    private func showSettingsWindow(initialPane: SettingsPane = .dateAndEvents) {
         popover.performClose(nil)
         model.refreshCalendarData()
+
+        let hostingController = NSHostingController(
+            rootView: SettingsWindowView(model: model, initialPane: initialPane)
+        )
+        hostingController.view.appearance = NSApp.appearance
 
         let window: NSWindow
         if let settingsWindow {
             window = settingsWindow
+            window.contentViewController = hostingController
         } else {
-            window = makeSettingsWindow()
+            window = makeSettingsWindow(hostingController: hostingController)
             settingsWindow = window
         }
 
@@ -324,12 +337,13 @@ final class StatusBarController: NSObject {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func makeSettingsWindow() -> NSWindow {
-        let hostingController = NSHostingController(rootView: SettingsWindowView(model: model))
-        hostingController.view.appearance = NSApp.appearance
+    private func makeSettingsWindow(
+        hostingController: NSHostingController<SettingsWindowView>
+    ) -> NSWindow {
         let window = NSWindow(contentViewController: hostingController)
         window.title = "TouchMacer Settings"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.tabbingMode = .disallowed
         window.setContentSize(NSSize(width: 760, height: 640))
         window.minSize = NSSize(width: 700, height: 520)
         window.toolbarStyle = .preference
@@ -337,6 +351,36 @@ final class StatusBarController: NSObject {
         window.center()
         window.setFrameAutosaveName("TouchMacerSettingsWindow")
         return window
+    }
+
+    private func showQuickActionsWindow() {
+        popover.performClose(nil)
+        model.quickActionService.refreshAll()
+
+        let hostingController = NSHostingController(
+            rootView: QuickActionsWindowView(model: model) { [weak self] in
+                self?.showSettingsWindow(initialPane: .quickActions)
+            }
+        )
+        hostingController.view.appearance = NSApp.appearance
+
+        let window = quickActionsWindow ?? NSWindow(contentViewController: hostingController)
+        if quickActionsWindow != nil {
+            window.contentViewController = hostingController
+        } else {
+            window.title = "TouchMacer Quick Actions"
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            window.tabbingMode = .disallowed
+            window.setContentSize(NSSize(width: 700, height: 600))
+            window.minSize = NSSize(width: 560, height: 420)
+            window.isReleasedWhenClosed = false
+            window.center()
+            window.setFrameAutosaveName("TouchMacerQuickActionsWindow")
+            quickActionsWindow = window
+        }
+        window.contentViewController?.view.appearance = NSApp.appearance
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func showQuickEventWindow() {
@@ -381,6 +425,7 @@ final class StatusBarController: NSObject {
     private func showPopover() {
         guard let button = statusItem.button else { return }
         model.refreshCalendarData()
+        model.quickActionService.refreshAll()
         refreshClockTitle()
         if !popover.isShown {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)

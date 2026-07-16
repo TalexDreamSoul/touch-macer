@@ -51,7 +51,7 @@ final class AppearanceService {
         }
     }
 
-    private func setSystemDarkMode(_ enabled: Bool) {
+    func setSystemDarkMode(_ enabled: Bool) {
         let script = """
         tell application "System Events"
             tell appearance preferences
@@ -83,7 +83,7 @@ final class AppearanceService {
         return true
     }
 
-    private var currentSystemDarkMode: Bool? {
+    var currentSystemDarkMode: Bool? {
         let script = """
         tell application "System Events"
             tell appearance preferences

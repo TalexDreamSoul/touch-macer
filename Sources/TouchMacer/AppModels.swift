@@ -13,6 +13,7 @@ struct AppSettings: Equatable {
     var calendarWeekStartDay: WeekStartDay
     var calendarSelectionMode: CalendarSelectionMode
     var selectedCalendarIDs: Set<String>
+    var pinnedQuickActions: [QuickActionReference]
 
     var clockTimeZones: [ClockTimeZone] {
         var seenIdentifiers = Set<String>()

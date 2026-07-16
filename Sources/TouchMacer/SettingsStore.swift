@@ -14,6 +14,7 @@ final class SettingsStore {
         static let calendarWeekStartDay = "calendarWeekStartDay"
         static let calendarSelectionMode = "calendarSelectionMode"
         static let selectedCalendarIDs = "selectedCalendarIDs"
+        static let pinnedQuickActions = "pinnedQuickActions"
     }
 
     private let defaults: UserDefaults
@@ -45,7 +46,8 @@ final class SettingsStore {
             overviewTimeZoneID: defaults.string(forKey: Key.overviewTimeZoneID) ?? systemTimeZoneID,
             calendarWeekStartDay: loadCalendarWeekStartDay(defaultValue: .monday),
             calendarSelectionMode: CalendarSelectionMode(rawValue: defaults.string(forKey: Key.calendarSelectionMode) ?? "") ?? .all,
-            selectedCalendarIDs: Set(defaults.stringArray(forKey: Key.selectedCalendarIDs) ?? [])
+            selectedCalendarIDs: Set(defaults.stringArray(forKey: Key.selectedCalendarIDs) ?? []),
+            pinnedQuickActions: loadPinnedQuickActions()
         )
     }
 
@@ -62,6 +64,7 @@ final class SettingsStore {
         defaults.set(settings.calendarWeekStartDay.rawValue, forKey: Key.calendarWeekStartDay)
         defaults.set(settings.calendarSelectionMode.rawValue, forKey: Key.calendarSelectionMode)
         defaults.set(Array(settings.selectedCalendarIDs).sorted(), forKey: Key.selectedCalendarIDs)
+        defaults.set(settings.pinnedQuickActions.map(\.storageValue), forKey: Key.pinnedQuickActions)
     }
 
     private func loadShowsSystemTimeZone(defaultValue: Bool) -> Bool {
@@ -77,6 +80,22 @@ final class SettingsStore {
     private func loadCalendarWeekStartDay(defaultValue: WeekStartDay) -> WeekStartDay {
         guard defaults.object(forKey: Key.calendarWeekStartDay) != nil else { return defaultValue }
         return WeekStartDay(rawValue: defaults.integer(forKey: Key.calendarWeekStartDay)) ?? defaultValue
+    }
+
+    private func loadPinnedQuickActions() -> [QuickActionReference] {
+        guard defaults.object(forKey: Key.pinnedQuickActions) != nil else {
+            return BuiltInQuickActionID.defaultPinned
+        }
+
+        var seen = Set<QuickActionReference>()
+        var references: [QuickActionReference] = []
+        for storageValue in defaults.stringArray(forKey: Key.pinnedQuickActions) ?? [] {
+            guard let reference = QuickActionReference(storageValue: storageValue) else { continue }
+            guard seen.insert(reference).inserted else { continue }
+            references.append(reference)
+            if references.count == 7 { break }
+        }
+        return references
     }
 
     private func defaultSelectedTimeZoneIDs(

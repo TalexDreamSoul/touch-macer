@@ -17,6 +17,8 @@ TouchMacer is a native macOS status bar clock app built with AppKit, SwiftUI, Ev
 - Native Launch at Login control through macOS Service Management.
 - Packaged macOS app icon for Finder, the Dock, and system Login Items.
 - Local settings persistence through `UserDefaults`.
+- Configurable 4×2 Quick Actions grid with up to seven pinned actions and a fixed More entry.
+- Fourteen built-in macOS actions plus Apple Shortcuts discovery, execution, availability feedback, and ordering in Settings.
 
 ## Install with Homebrew
 
