@@ -3,14 +3,22 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="TouchMacer"
+HELPER_NAME="TouchMacerHelper"
 BUILD_CONFIG="${BUILD_CONFIG:-release}"
-APP_VERSION="0.2.0"
-BUILD_NUMBER="5"
+APP_VERSION="0.3.0"
+BUILD_NUMBER="7"
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
+APPLE_TEAM_ID="${APPLE_TEAM_ID:-}"
+PROVISIONING_PROFILE="${PROVISIONING_PROFILE:-}"
+RESOLVED_APP_ENTITLEMENTS="$ROOT_DIR/.build/TouchMacer.resolved.entitlements"
+PROFILE_PLIST="$ROOT_DIR/.build/TouchMacer.profile.plist"
 ICON_SOURCE="$ROOT_DIR/assets/AppIcon.png"
 APP_DIR="$ROOT_DIR/.build/app/$APP_NAME.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
+HELPER_TOOLS_DIR="$CONTENTS_DIR/Library/HelperTools"
+LAUNCH_DAEMONS_DIR="$CONTENTS_DIR/Library/LaunchDaemons"
 ICONSET_DIR="$ROOT_DIR/.build/AppIcon.iconset"
 ICNS_PATH="$ROOT_DIR/.build/AppIcon.icns"
 
@@ -18,9 +26,11 @@ cd "$ROOT_DIR"
 swift build -c "$BUILD_CONFIG"
 
 rm -rf "$APP_DIR" "$ICONSET_DIR" "$ICNS_PATH"
-mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$ICONSET_DIR"
+mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$HELPER_TOOLS_DIR" "$LAUNCH_DAEMONS_DIR" "$ICONSET_DIR"
 cp "$ROOT_DIR/.build/$BUILD_CONFIG/$APP_NAME" "$MACOS_DIR/$APP_NAME"
-chmod +x "$MACOS_DIR/$APP_NAME"
+cp "$ROOT_DIR/.build/$BUILD_CONFIG/$HELPER_NAME" "$HELPER_TOOLS_DIR/$HELPER_NAME"
+cp "$ROOT_DIR/Resources/com.touchmacer.clock.helper.plist" "$LAUNCH_DAEMONS_DIR/com.touchmacer.clock.helper.plist"
+chmod +x "$MACOS_DIR/$APP_NAME" "$HELPER_TOOLS_DIR/$HELPER_NAME"
 
 if [[ ! -f "$ICON_SOURCE" ]]; then
     echo "Missing icon source: $ICON_SOURCE" >&2
@@ -81,6 +91,68 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 </plist>
 PLIST
 
+codesign --force --sign "$CODESIGN_IDENTITY" \
+    --entitlements "$ROOT_DIR/Resources/TouchMacerHelper.entitlements" \
+    "$HELPER_TOOLS_DIR/$HELPER_NAME"
 
-codesign --force --deep --sign - "$APP_DIR"
-echo "Built $APP_DIR"
+if [[ -n "$APPLE_TEAM_ID" ]]; then
+    if [[ "$CODESIGN_IDENTITY" == "-" ]]; then
+        echo "CODESIGN_IDENTITY must name an Apple signing identity when APPLE_TEAM_ID is set." >&2
+        exit 1
+    fi
+    if [[ -z "$PROVISIONING_PROFILE" || ! -f "$PROVISIONING_PROFILE" ]]; then
+        echo "PROVISIONING_PROFILE must point to an iCloud-enabled macOS provisioning profile." >&2
+        exit 1
+    fi
+
+    security cms -D -i "$PROVISIONING_PROFILE" > "$PROFILE_PLIST"
+    PROFILE_TEAM_ID="$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$PROFILE_PLIST")"
+    PROFILE_APP_IDENTIFIER_PREFIX="$(/usr/libexec/PlistBuddy -c 'Print :ApplicationIdentifierPrefix:0' "$PROFILE_PLIST")"
+    if ! PROFILE_APPLICATION_IDENTIFIER="$(/usr/libexec/PlistBuddy \
+        -c 'Print :Entitlements:com.apple.application-identifier' \
+        "$PROFILE_PLIST" 2>/dev/null)"; then
+        PROFILE_APPLICATION_IDENTIFIER="$(/usr/libexec/PlistBuddy \
+            -c 'Print :Entitlements:application-identifier' \
+            "$PROFILE_PLIST")"
+    fi
+    EXPECTED_APPLICATION_IDENTIFIER="$PROFILE_APP_IDENTIFIER_PREFIX.com.touchmacer.clock"
+
+    if [[ "$PROFILE_TEAM_ID" != "$APPLE_TEAM_ID" ]]; then
+        echo "Provisioning profile team $PROFILE_TEAM_ID does not match APPLE_TEAM_ID $APPLE_TEAM_ID." >&2
+        exit 1
+    fi
+    if [[ "$PROFILE_APPLICATION_IDENTIFIER" != "$EXPECTED_APPLICATION_IDENTIFIER" \
+        && "$PROFILE_APPLICATION_IDENTIFIER" != "$PROFILE_APP_IDENTIFIER_PREFIX.*" ]]; then
+        echo "Provisioning profile does not authorize com.touchmacer.clock." >&2
+        exit 1
+    fi
+    if ! /usr/libexec/PlistBuddy \
+        -c 'Print :Entitlements:com.apple.developer.ubiquity-kvstore-identifier' \
+        "$PROFILE_PLIST" >/dev/null 2>&1; then
+        echo "Provisioning profile is missing the iCloud key-value-store entitlement." >&2
+        exit 1
+    fi
+
+    cp "$PROVISIONING_PROFILE" "$CONTENTS_DIR/embedded.provisionprofile"
+    cat > "$RESOLVED_APP_ENTITLEMENTS" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.application-identifier</key>
+    <string>$EXPECTED_APPLICATION_IDENTIFIER</string>
+    <key>com.apple.developer.team-identifier</key>
+    <string>$PROFILE_TEAM_ID</string>
+    <key>com.apple.developer.ubiquity-kvstore-identifier</key>
+    <string>$EXPECTED_APPLICATION_IDENTIFIER</string>
+</dict>
+</plist>
+PLIST
+    codesign --force --sign "$CODESIGN_IDENTITY" \
+        --entitlements "$RESOLVED_APP_ENTITLEMENTS" \
+        "$APP_DIR"
+    echo "Built iCloud-enabled $APP_DIR"
+else
+    codesign --force --sign "$CODESIGN_IDENTITY" "$APP_DIR"
+    echo "Built local-only $APP_DIR"
+fi

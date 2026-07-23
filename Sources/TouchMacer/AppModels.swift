@@ -1,10 +1,116 @@
 import Foundation
 
+enum MenuBarFormatMode: String, CaseIterable, Codable, Identifiable {
+    case structured
+    case advanced
+
+    var id: String { rawValue }
+    var title: String { self == .structured ? "Structured" : "Advanced" }
+}
+
+enum ClockCycle: String, CaseIterable, Codable, Identifiable {
+    case system
+    case twelveHour
+    case twentyFourHour
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system: return "System"
+        case .twelveHour: return "12-hour"
+        case .twentyFourHour: return "24-hour"
+        }
+    }
+}
+
+enum MenuBarDateStyle: String, CaseIterable, Codable, Identifiable {
+    case hidden
+    case systemShort
+    case abbreviated
+    case iso
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .hidden: return "Hidden"
+        case .systemShort: return "System Short"
+        case .abbreviated: return "Abbreviated"
+        case .iso: return "ISO"
+        }
+    }
+}
+
+enum WeekdayStyle: String, CaseIterable, Codable, Identifiable {
+    case hidden
+    case short
+    case full
+
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
+enum MenuBarSegmentOrder: String, CaseIterable, Codable, Identifiable {
+    case dateThenTime
+    case timeThenDate
+
+    var id: String { rawValue }
+    var title: String { self == .dateThenTime ? "Date, then time" : "Time, then date" }
+}
+
+struct MenuBarFormatSettings: Codable, Equatable {
+    var mode: MenuBarFormatMode
+    var clockCycle: ClockCycle
+    var showsSeconds: Bool
+    var dateStyle: MenuBarDateStyle
+    var weekdayStyle: WeekdayStyle
+    var segmentOrder: MenuBarSegmentOrder
+    var advancedDatePattern: String
+    var advancedTimePattern: String
+
+    static let compatibilityDefault = MenuBarFormatSettings(
+        mode: .structured,
+        clockCycle: .twentyFourHour,
+        showsSeconds: true,
+        dateStyle: .abbreviated,
+        weekdayStyle: .short,
+        segmentOrder: .dateThenTime,
+        advancedDatePattern: "EEE MMM d",
+        advancedTimePattern: "HH:mm:ss"
+    )
+}
+
+struct ClockEntry: Codable, Equatable, Identifiable {
+    static let systemID = "system"
+
+    let id: String
+    let customLabel: String?
+
+    var isSystem: Bool { id == Self.systemID }
+
+    static func system(customLabel: String? = nil) -> ClockEntry {
+        ClockEntry(id: systemID, customLabel: normalizedLabel(customLabel))
+    }
+
+    static func custom(identifier: String, customLabel: String? = nil) -> ClockEntry? {
+        guard identifier != systemID, TimeZone(identifier: identifier) != nil else { return nil }
+        return ClockEntry(id: identifier, customLabel: normalizedLabel(customLabel))
+    }
+
+    func updatingLabel(_ label: String?) -> ClockEntry {
+        ClockEntry(id: id, customLabel: Self.normalizedLabel(label))
+    }
+
+    private static func normalizedLabel(_ label: String?) -> String? {
+        let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
 struct AppSettings: Equatable {
-    var displayTimeZoneMode: TimeZoneMode
-    var customDisplayTimeZoneID: String
-    var showsSystemTimeZone: Bool
-    var selectedTimeZoneIDs: [String]
+    var menuBarFormat: MenuBarFormatSettings
+    private(set) var clockEntries: [ClockEntry]
     var statusBarSwitchIntervalSeconds: TimeInterval
     var appearanceMode: AppearanceMode
     var appearanceTimeZoneID: String
@@ -14,24 +120,55 @@ struct AppSettings: Equatable {
     var calendarSelectionMode: CalendarSelectionMode
     var selectedCalendarIDs: Set<String>
     var pinnedQuickActions: [QuickActionReference]
+    var preferenceSyncEnabled: Bool
+    var preferenceSyncOnboardingCompleted: Bool
+    var portableModificationDates: [PortableSettingField: Date]
+    var iCloudIdentityTokenData: Data?
+    var syncDeviceID: String
+
+    init(
+        menuBarFormat: MenuBarFormatSettings = .compatibilityDefault,
+        clockEntries: [ClockEntry] = [.system()],
+        statusBarSwitchIntervalSeconds: TimeInterval,
+        appearanceMode: AppearanceMode,
+        appearanceTimeZoneID: String,
+        appliesSystemAppearance: Bool,
+        overviewTimeZoneID: String,
+        calendarWeekStartDay: WeekStartDay,
+        calendarSelectionMode: CalendarSelectionMode,
+        selectedCalendarIDs: Set<String>,
+        pinnedQuickActions: [QuickActionReference],
+        preferenceSyncEnabled: Bool = false,
+        preferenceSyncOnboardingCompleted: Bool = false,
+        portableModificationDates: [PortableSettingField: Date] = [:],
+        iCloudIdentityTokenData: Data? = nil,
+        syncDeviceID: String = UUID().uuidString
+    ) {
+        self.menuBarFormat = menuBarFormat
+        self.clockEntries = Self.normalizedClockEntries(clockEntries)
+        self.statusBarSwitchIntervalSeconds = statusBarSwitchIntervalSeconds
+        self.appearanceMode = appearanceMode
+        self.appearanceTimeZoneID = appearanceTimeZoneID
+        self.appliesSystemAppearance = appliesSystemAppearance
+        self.overviewTimeZoneID = overviewTimeZoneID
+        self.calendarWeekStartDay = calendarWeekStartDay
+        self.calendarSelectionMode = calendarSelectionMode
+        self.selectedCalendarIDs = selectedCalendarIDs
+        self.pinnedQuickActions = pinnedQuickActions
+        self.preferenceSyncEnabled = preferenceSyncEnabled
+        self.preferenceSyncOnboardingCompleted = preferenceSyncOnboardingCompleted
+        self.portableModificationDates = portableModificationDates
+        self.iCloudIdentityTokenData = iCloudIdentityTokenData
+        self.syncDeviceID = syncDeviceID
+    }
 
     var clockTimeZones: [ClockTimeZone] {
-        var seenIdentifiers = Set<String>()
-        var clocks: [ClockTimeZone] = []
-        let systemTimeZone = TimeZone.autoupdatingCurrent
-
-        if showsSystemTimeZone {
-            clocks.append(.system(timeZone: systemTimeZone))
-            seenIdentifiers.insert(systemTimeZone.identifier)
+        clockEntries.compactMap { entry in
+            if entry.isSystem {
+                return .system(timeZone: .autoupdatingCurrent, customLabel: entry.customLabel)
+            }
+            return .custom(identifier: entry.id, customLabel: entry.customLabel)
         }
-
-        for identifier in selectedTimeZoneIDs where !seenIdentifiers.contains(identifier) {
-            guard let clock = ClockTimeZone.custom(identifier: identifier) else { continue }
-            clocks.append(clock)
-            seenIdentifiers.insert(identifier)
-        }
-
-        return clocks.isEmpty ? [.system(timeZone: systemTimeZone)] : clocks
     }
 
     var displayTimeZone: TimeZone {
@@ -55,10 +192,84 @@ struct AppSettings: Equatable {
         let index = ((slot % clocks.count) + clocks.count) % clocks.count
         return clocks[index]
     }
+
+    @discardableResult
+    mutating func addClock(identifier: String) -> Bool {
+        guard !clockEntries.contains(where: { $0.id == identifier }) else { return false }
+        guard let entry = ClockEntry.custom(identifier: identifier) else { return false }
+        clockEntries.append(entry)
+        return true
+    }
+
+    @discardableResult
+    mutating func addSystemClock() -> Bool {
+        guard !clockEntries.contains(where: \.isSystem) else { return false }
+        clockEntries.append(.system())
+        return true
+    }
+
+    @discardableResult
+    mutating func removeClock(id: String) -> Bool {
+        guard clockEntries.count > 1 else { return false }
+        guard let index = clockEntries.firstIndex(where: { $0.id == id }) else { return false }
+        clockEntries.remove(at: index)
+        return true
+    }
+
+    @discardableResult
+    mutating func moveClock(id: String, by offset: Int) -> Bool {
+        guard let source = clockEntries.firstIndex(where: { $0.id == id }) else { return false }
+        let destination = source + offset
+        guard clockEntries.indices.contains(destination) else { return false }
+        clockEntries.swapAt(source, destination)
+        return true
+    }
+
+    mutating func moveClocks(fromOffsets source: IndexSet, toOffset destination: Int) {
+        guard !source.isEmpty else { return }
+        let moving = source.sorted().map { clockEntries[$0] }
+        var remaining = clockEntries.enumerated()
+            .filter { !source.contains($0.offset) }
+            .map(\.element)
+        let removedBeforeDestination = source.filter { $0 < destination }.count
+        let insertionIndex = min(
+            remaining.count,
+            max(0, destination - removedBeforeDestination)
+        )
+        remaining.insert(contentsOf: moving, at: insertionIndex)
+        clockEntries = remaining
+    }
+
+    @discardableResult
+    mutating func updateClockLabel(id: String, label: String?) -> Bool {
+        guard let index = clockEntries.firstIndex(where: { $0.id == id }) else { return false }
+        let updated = clockEntries[index].updatingLabel(label)
+        guard updated != clockEntries[index] else { return false }
+        clockEntries[index] = updated
+        return true
+    }
+
+    mutating func replaceClockEntries(_ entries: [ClockEntry]) {
+        clockEntries = Self.normalizedClockEntries(entries)
+    }
+
+    private static func normalizedClockEntries(_ entries: [ClockEntry]) -> [ClockEntry] {
+        var seen = Set<String>()
+        var normalized: [ClockEntry] = []
+        for entry in entries where seen.insert(entry.id).inserted {
+            if entry.isSystem {
+                normalized.append(.system(customLabel: entry.customLabel))
+            } else if let custom = ClockEntry.custom(identifier: entry.id, customLabel: entry.customLabel) {
+                normalized.append(custom)
+            }
+        }
+        return normalized.isEmpty ? [.system()] : normalized
+    }
 }
 
 struct ClockTimeZone: Identifiable, Equatable {
     let id: String
+    let customLabel: String?
     let identifier: String
     let title: String
     let menuBarTitle: String
@@ -68,13 +279,15 @@ struct ClockTimeZone: Identifiable, Equatable {
     let timeZone: TimeZone
     let isSystem: Bool
 
-    static func system(timeZone: TimeZone) -> ClockTimeZone {
-        ClockTimeZone(
-            id: "system",
+    static func system(timeZone: TimeZone, customLabel: String? = nil) -> ClockTimeZone {
+        let title = customLabel ?? TimeZoneCatalog.shortTitle(for: timeZone.identifier)
+        return ClockTimeZone(
+            id: ClockEntry.systemID,
+            customLabel: customLabel,
             identifier: timeZone.identifier,
-            title: TimeZoneCatalog.shortTitle(for: timeZone.identifier),
-            menuBarTitle: TimeZoneCatalog.shortTitle(for: timeZone.identifier),
-            statusBarTitle: TimeZoneCatalog.statusTitle(for: timeZone.identifier),
+            title: title,
+            menuBarTitle: title,
+            statusBarTitle: customLabel ?? TimeZoneCatalog.statusTitle(for: timeZone.identifier),
             flag: TimeZoneCatalog.flag(for: timeZone.identifier),
             subtitle: TimeZoneCatalog.displayName(for: timeZone.identifier),
             timeZone: timeZone,
@@ -82,19 +295,53 @@ struct ClockTimeZone: Identifiable, Equatable {
         )
     }
 
-    static func custom(identifier: String) -> ClockTimeZone? {
+    static func custom(identifier: String, customLabel: String? = nil) -> ClockTimeZone? {
         guard let timeZone = TimeZone(identifier: identifier) else { return nil }
+        let title = customLabel ?? TimeZoneCatalog.shortTitle(for: identifier)
         return ClockTimeZone(
             id: identifier,
+            customLabel: customLabel,
             identifier: identifier,
-            title: TimeZoneCatalog.shortTitle(for: identifier),
-            menuBarTitle: TimeZoneCatalog.shortTitle(for: identifier),
-            statusBarTitle: TimeZoneCatalog.statusTitle(for: identifier),
+            title: title,
+            menuBarTitle: title,
+            statusBarTitle: customLabel ?? TimeZoneCatalog.statusTitle(for: identifier),
             flag: TimeZoneCatalog.flag(for: identifier),
             subtitle: TimeZoneCatalog.displayName(for: identifier),
             timeZone: timeZone,
             isSystem: false
         )
+    }
+}
+
+enum ClockCarouselNavigator {
+    static func adjacentClockID(
+        in clocks: [ClockTimeZone],
+        currentID: String?,
+        step: Int
+    ) -> String? {
+        guard clocks.count > 1, step != 0 else { return nil }
+        let currentIndex = currentID.flatMap { id in
+            clocks.firstIndex(where: { $0.id == id })
+        } ?? 0
+        let normalizedStep = step > 0 ? 1 : -1
+        let nextIndex = ((currentIndex + normalizedStep) % clocks.count + clocks.count)
+            % clocks.count
+        return clocks[nextIndex].id
+    }
+}
+
+enum StatusClockResolver {
+    static func clock(
+        in settings: AppSettings,
+        manualClockID: String?,
+        at date: Date
+    ) -> ClockTimeZone {
+        if let manualClockID,
+           let manualClock = settings.clockTimeZones.first(where: { $0.id == manualClockID })
+        {
+            return manualClock
+        }
+        return settings.statusBarClock(at: date)
     }
 }
 
@@ -112,7 +359,7 @@ enum TimeZoneMode: String, CaseIterable, Identifiable {
     }
 }
 
-enum AppearanceMode: String, CaseIterable, Identifiable {
+enum AppearanceMode: String, CaseIterable, Codable, Identifiable {
     case system
     case light
     case dark
@@ -144,7 +391,7 @@ enum CalendarSelectionMode: String, CaseIterable, Identifiable {
     }
 }
 
-enum WeekStartDay: Int, CaseIterable, Identifiable {
+enum WeekStartDay: Int, CaseIterable, Codable, Identifiable {
     case sunday = 1
     case monday = 2
     case tuesday = 3

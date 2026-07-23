@@ -8,15 +8,15 @@ TouchMacer is a native macOS status bar clock app built with AppKit, SwiftUI, Ev
 
 ## Features
 
-- Live status bar clock that can show multiple time zones.
-- Overview popover with world clocks, current system time zone, and upcoming events.
-- Sidebar settings window for system/custom time zones, Calendar filters, appearance preferences, app info, and GitHub update checks.
+- Configurable menu-bar date/time formatting with structured controls, advanced Unicode patterns, live preview, validation, and reset.
+- Ordered system/custom world-clock carousel with drag reordering, custom labels, timed rotation, and mouse-wheel or trackpad switching directly over the status item. Manual gesture selection pauses timed rotation until **Auto Rotate** is selected.
+- Overview popover with world clocks, current system time zone, and upcoming events, plus a sidebar settings window for clock formatting, time zones, iCloud Sync, Calendar filters, appearance, app info, and update checks.
 - EventKit Calendar integration for iCloud/local calendars configured in macOS Calendar.
 - Calendar picker for all calendars or selected calendars.
 - Appearance modes: system, light, dark, or automatic by a selected time zone, with an optional switch to apply the result to macOS system Light/Dark appearance.
 - Native Launch at Login control through macOS Service Management.
 - Packaged macOS app icon for Finder, the Dock, and system Login Items.
-- Local settings persistence through `UserDefaults`.
+- Local settings persistence through `UserDefaults`, with opt-in iCloud key-value synchronization for portable preferences in entitlement-enabled builds.
 - Configurable 4×2 Quick Actions grid with up to seven pinned actions and a fixed More entry.
 - Fourteen built-in macOS actions plus Apple Shortcuts discovery, execution, availability feedback, and ordering in Settings.
 
@@ -44,8 +44,17 @@ scripts/build-app.sh
 open .build/app/TouchMacer.app
 ```
 
+The default command keeps the ad-hoc GitHub build local-only. To embed an iCloud-enabled provisioning profile and sign with an Apple identity, provide `CODESIGN_IDENTITY`, `APPLE_TEAM_ID`, and `PROVISIONING_PROFILE`:
+
+```bash
+CODESIGN_IDENTITY="Apple Development: Your Name" \
+APPLE_TEAM_ID="YOURTEAMID" \
+PROVISIONING_PROFILE="/path/to/TouchMacer.provisionprofile" \
+scripts/build-app.sh
+```
+
 ## Notes
 
-- iCloud access is provided through macOS Calendar/EventKit; the app does not store iCloud credentials.
+- Calendar data continues to come from macOS Calendar/EventKit; TouchMacer never stores iCloud credentials or duplicates calendar contents. Entitlement-enabled builds can separately sync portable display preferences through `NSUbiquitousKeyValueStore`; ad-hoc builds hide this capability and remain local-only.
 - Automatic appearance uses light mode from 07:00 to 19:00 in the selected reference time zone, and dark mode otherwise.
 - System-level appearance switching requires macOS Automation permission and is disabled until you enable it in Settings. When enabled, TouchMacer periodically corrects macOS if another automatic schedule changes Light/Dark mode away from the selected setting.

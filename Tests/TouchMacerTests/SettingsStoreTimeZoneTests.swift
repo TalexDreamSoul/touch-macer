@@ -25,13 +25,39 @@ final class SettingsStoreTimeZoneTests: XCTestCase {
         super.tearDown()
     }
 
-    func testEmptyDefaultsLoadSystemTimeZoneAsFirstClock() {
+    func testEmptyDefaultsResolveSystemClockAsFirstClock() {
         let settings = store.load()
         let firstClock = settings.clockTimeZones.first
 
-        XCTAssertTrue(settings.showsSystemTimeZone)
+        XCTAssertEqual(settings.clockEntries.first?.id, ClockEntry.systemID)
         XCTAssertEqual(firstClock?.identifier, TimeZone.autoupdatingCurrent.identifier)
-        XCTAssertEqual(firstClock?.isSystem, true)
+        XCTAssertTrue(firstClock?.isSystem ?? false)
+    }
+    func testLegacyClockKeysMigrateEnabledSystemBeforeCustomClocksInOriginalOrder() {
+        defaults.set(true, forKey: "showsSystemTimeZone")
+        defaults.set(
+            [TimeZone.autoupdatingCurrent.identifier, "America/New_York", "Asia/Tokyo"],
+            forKey: "selectedTimeZoneIDs"
+        )
+
+        let settings = store.load()
+
+        XCTAssertEqual(
+            settings.clockEntries.map(\.id),
+            [ClockEntry.systemID, "America/New_York", "Asia/Tokyo"]
+        )
+    }
+
+    func testLegacyClockKeysMigrateHiddenSystemAndDiscardInvalidOrDuplicateCustomClocks() {
+        defaults.set(false, forKey: "showsSystemTimeZone")
+        defaults.set(
+            ["America/Los_Angeles", "Not/AZone", "America/Los_Angeles", "Asia/Shanghai"],
+            forKey: "selectedTimeZoneIDs"
+        )
+
+        let settings = store.load()
+
+        XCTAssertEqual(settings.clockEntries.map(\.id), ["America/Los_Angeles", "Asia/Shanghai"])
     }
 
     func testEmptyDefaultsLoadMondayAsCalendarWeekStartDay() {
@@ -81,9 +107,12 @@ final class SettingsStoreTimeZoneTests: XCTestCase {
         XCTAssertEqual(draft.endDate, expectedStart.addingTimeInterval(60 * 60))
     }
 
-    func testOverviewTimeZonePersistsSeparatelyFromMenuBarAndAppearanceTimeZones() {
+    func testOverviewTimeZonePersistsSeparatelyFromClockEntriesAndAppearanceTimeZone() {
         var settings = store.load()
-        settings.selectedTimeZoneIDs = ["America/New_York", "Asia/Tokyo"]
+        settings.replaceClockEntries([
+            ClockEntry.custom(identifier: "America/New_York")!,
+            ClockEntry.custom(identifier: "Asia/Tokyo")!
+        ])
         settings.appearanceTimeZoneID = "Europe/London"
         settings.overviewTimeZoneID = "Pacific/Honolulu"
 
@@ -93,10 +122,10 @@ final class SettingsStoreTimeZoneTests: XCTestCase {
 
         XCTAssertEqual(reloaded.overviewTimeZoneID, "Pacific/Honolulu")
         XCTAssertEqual(reloaded.overviewTimeZone.identifier, "Pacific/Honolulu")
-        XCTAssertEqual(reloaded.selectedTimeZoneIDs, ["America/New_York", "Asia/Tokyo"])
+        XCTAssertEqual(reloaded.clockEntries.map(\.id), ["America/New_York", "Asia/Tokyo"])
         XCTAssertEqual(reloaded.appearanceTimeZoneID, "Europe/London")
         XCTAssertEqual(reloaded.appearanceTimeZone.identifier, "Europe/London")
-        XCTAssertNotEqual(reloaded.overviewTimeZoneID, reloaded.selectedTimeZoneIDs.first)
+        XCTAssertNotEqual(reloaded.overviewTimeZoneID, reloaded.clockEntries.first?.id)
         XCTAssertNotEqual(reloaded.overviewTimeZoneID, reloaded.appearanceTimeZoneID)
     }
 
@@ -111,10 +140,12 @@ final class SettingsStoreTimeZoneTests: XCTestCase {
         XCTAssertEqual(reloaded.statusBarSwitchIntervalSeconds, 8)
     }
 
-    func testStatusBarClockRotatesAcrossConfiguredTimeZones() {
+    func testStatusBarClockRotatesAcrossOrderedClockEntries() {
         var settings = store.load()
-        settings.showsSystemTimeZone = false
-        settings.selectedTimeZoneIDs = ["America/Los_Angeles", "Asia/Shanghai"]
+        settings.replaceClockEntries([
+            ClockEntry.custom(identifier: "America/Los_Angeles")!,
+            ClockEntry.custom(identifier: "Asia/Shanghai")!
+        ])
 
         let start = Date(timeIntervalSinceReferenceDate: 0)
 

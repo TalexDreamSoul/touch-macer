@@ -2,10 +2,8 @@ import Foundation
 
 final class SettingsStore {
     private enum Key {
-        static let displayTimeZoneMode = "displayTimeZoneMode"
-        static let customDisplayTimeZoneID = "customDisplayTimeZoneID"
-        static let showsSystemTimeZone = "showsSystemTimeZone"
-        static let selectedTimeZoneIDs = "selectedTimeZoneIDs"
+        static let menuBarFormat = "menuBarFormat.v1"
+        static let clockEntries = "clockEntries.v1"
         static let statusBarSwitchIntervalSeconds = "statusBarSwitchIntervalSeconds"
         static let appearanceMode = "appearanceMode"
         static let appearanceTimeZoneID = "appearanceTimeZoneID"
@@ -15,9 +13,21 @@ final class SettingsStore {
         static let calendarSelectionMode = "calendarSelectionMode"
         static let selectedCalendarIDs = "selectedCalendarIDs"
         static let pinnedQuickActions = "pinnedQuickActions"
+        static let preferenceSyncEnabled = "preferenceSyncEnabled"
+        static let preferenceSyncOnboardingCompleted = "preferenceSyncOnboardingCompleted"
+        static let portableModificationDates = "portableModificationDates.v1"
+        static let iCloudIdentityTokenData = "iCloudIdentityTokenData"
+        static let syncDeviceID = "syncDeviceID"
+
+        static let legacyDisplayTimeZoneMode = "displayTimeZoneMode"
+        static let legacyCustomDisplayTimeZoneID = "customDisplayTimeZoneID"
+        static let legacyShowsSystemTimeZone = "showsSystemTimeZone"
+        static let legacySelectedTimeZoneIDs = "selectedTimeZoneIDs"
     }
 
     private let defaults: UserDefaults
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -25,37 +35,57 @@ final class SettingsStore {
 
     func load() -> AppSettings {
         let systemTimeZoneID = TimeZone.autoupdatingCurrent.identifier
-        let legacyMode = TimeZoneMode(rawValue: defaults.string(forKey: Key.displayTimeZoneMode) ?? "") ?? .system
-        let legacyCustomTimeZoneID = defaults.string(forKey: Key.customDisplayTimeZoneID) ?? systemTimeZoneID
-        let selectedTimeZoneIDs = defaults.stringArray(forKey: Key.selectedTimeZoneIDs) ?? defaultSelectedTimeZoneIDs(
-            legacyMode: legacyMode,
-            legacyCustomTimeZoneID: legacyCustomTimeZoneID,
-            systemTimeZoneID: systemTimeZoneID
-        )
+        let legacyMode = TimeZoneMode(
+            rawValue: defaults.string(forKey: Key.legacyDisplayTimeZoneMode) ?? ""
+        ) ?? .system
+        let legacyCustomTimeZoneID =
+            defaults.string(forKey: Key.legacyCustomDisplayTimeZoneID) ?? systemTimeZoneID
+        let legacySelectedTimeZoneIDs =
+            defaults.stringArray(forKey: Key.legacySelectedTimeZoneIDs)
+            ?? defaultSelectedTimeZoneIDs(
+                legacyMode: legacyMode,
+                legacyCustomTimeZoneID: legacyCustomTimeZoneID,
+                systemTimeZoneID: systemTimeZoneID
+            )
 
-        let statusBarSwitchIntervalSeconds = loadStatusBarSwitchIntervalSeconds(defaultValue: 5)
         return AppSettings(
-            displayTimeZoneMode: legacyMode,
-            customDisplayTimeZoneID: legacyCustomTimeZoneID,
-            showsSystemTimeZone: loadShowsSystemTimeZone(defaultValue: true),
-            selectedTimeZoneIDs: selectedTimeZoneIDs,
-            statusBarSwitchIntervalSeconds: statusBarSwitchIntervalSeconds,
-            appearanceMode: AppearanceMode(rawValue: defaults.string(forKey: Key.appearanceMode) ?? "") ?? .system,
-            appearanceTimeZoneID: defaults.string(forKey: Key.appearanceTimeZoneID) ?? systemTimeZoneID,
+            menuBarFormat: loadMenuBarFormat(),
+            clockEntries: loadClockEntries(
+                legacySelectedTimeZoneIDs: legacySelectedTimeZoneIDs,
+                systemTimeZoneID: systemTimeZoneID
+            ),
+            statusBarSwitchIntervalSeconds: loadStatusBarSwitchIntervalSeconds(defaultValue: 5),
+            appearanceMode: AppearanceMode(
+                rawValue: defaults.string(forKey: Key.appearanceMode) ?? ""
+            ) ?? .system,
+            appearanceTimeZoneID: defaults.string(forKey: Key.appearanceTimeZoneID)
+                ?? systemTimeZoneID,
             appliesSystemAppearance: defaults.bool(forKey: Key.appliesSystemAppearance),
-            overviewTimeZoneID: defaults.string(forKey: Key.overviewTimeZoneID) ?? systemTimeZoneID,
+            overviewTimeZoneID: defaults.string(forKey: Key.overviewTimeZoneID)
+                ?? systemTimeZoneID,
             calendarWeekStartDay: loadCalendarWeekStartDay(defaultValue: .monday),
-            calendarSelectionMode: CalendarSelectionMode(rawValue: defaults.string(forKey: Key.calendarSelectionMode) ?? "") ?? .all,
+            calendarSelectionMode: CalendarSelectionMode(
+                rawValue: defaults.string(forKey: Key.calendarSelectionMode) ?? ""
+            ) ?? .all,
             selectedCalendarIDs: Set(defaults.stringArray(forKey: Key.selectedCalendarIDs) ?? []),
-            pinnedQuickActions: loadPinnedQuickActions()
+            pinnedQuickActions: loadPinnedQuickActions(),
+            preferenceSyncEnabled: defaults.bool(forKey: Key.preferenceSyncEnabled),
+            preferenceSyncOnboardingCompleted: defaults.bool(
+                forKey: Key.preferenceSyncOnboardingCompleted
+            ),
+            portableModificationDates: loadPortableModificationDates(),
+            iCloudIdentityTokenData: defaults.data(forKey: Key.iCloudIdentityTokenData),
+            syncDeviceID: loadSyncDeviceID()
         )
     }
 
     func save(_ settings: AppSettings) {
-        defaults.set(settings.displayTimeZoneMode.rawValue, forKey: Key.displayTimeZoneMode)
-        defaults.set(settings.customDisplayTimeZoneID, forKey: Key.customDisplayTimeZoneID)
-        defaults.set(settings.showsSystemTimeZone, forKey: Key.showsSystemTimeZone)
-        defaults.set(settings.selectedTimeZoneIDs, forKey: Key.selectedTimeZoneIDs)
+        if let data = try? encoder.encode(settings.menuBarFormat) {
+            defaults.set(data, forKey: Key.menuBarFormat)
+        }
+        if let data = try? encoder.encode(settings.clockEntries) {
+            defaults.set(data, forKey: Key.clockEntries)
+        }
         defaults.set(settings.statusBarSwitchIntervalSeconds, forKey: Key.statusBarSwitchIntervalSeconds)
         defaults.set(settings.appearanceMode.rawValue, forKey: Key.appearanceMode)
         defaults.set(settings.appearanceTimeZoneID, forKey: Key.appearanceTimeZoneID)
@@ -65,21 +95,80 @@ final class SettingsStore {
         defaults.set(settings.calendarSelectionMode.rawValue, forKey: Key.calendarSelectionMode)
         defaults.set(Array(settings.selectedCalendarIDs).sorted(), forKey: Key.selectedCalendarIDs)
         defaults.set(settings.pinnedQuickActions.map(\.storageValue), forKey: Key.pinnedQuickActions)
+        defaults.set(settings.preferenceSyncEnabled, forKey: Key.preferenceSyncEnabled)
+        defaults.set(
+            settings.preferenceSyncOnboardingCompleted,
+            forKey: Key.preferenceSyncOnboardingCompleted
+        )
+        defaults.set(
+            Dictionary(uniqueKeysWithValues: settings.portableModificationDates.map {
+                ($0.key.rawValue, $0.value.timeIntervalSinceReferenceDate)
+            }),
+            forKey: Key.portableModificationDates
+        )
+        defaults.set(settings.iCloudIdentityTokenData, forKey: Key.iCloudIdentityTokenData)
+        defaults.set(settings.syncDeviceID, forKey: Key.syncDeviceID)
     }
 
-    private func loadShowsSystemTimeZone(defaultValue: Bool) -> Bool {
-        guard defaults.object(forKey: Key.showsSystemTimeZone) != nil else { return defaultValue }
-        return defaults.bool(forKey: Key.showsSystemTimeZone)
+    private func loadMenuBarFormat() -> MenuBarFormatSettings {
+        guard let data = defaults.data(forKey: Key.menuBarFormat),
+              let format = try? decoder.decode(MenuBarFormatSettings.self, from: data),
+              MenuBarClockRenderer.validation(for: format) == .valid
+        else {
+            return .compatibilityDefault
+        }
+        return format
+    }
+
+    private func loadClockEntries(
+        legacySelectedTimeZoneIDs: [String],
+        systemTimeZoneID: String
+    ) -> [ClockEntry] {
+        if defaults.object(forKey: Key.clockEntries) != nil {
+            guard let data = defaults.data(forKey: Key.clockEntries),
+                  let entries = try? decoder.decode([ClockEntry].self, from: data)
+            else {
+                return [.system()]
+            }
+            return entries
+        }
+
+        var entries: [ClockEntry] = []
+        let includesSystem = loadLegacyShowsSystemTimeZone(defaultValue: true)
+        if includesSystem {
+            entries.append(.system())
+        }
+
+        var seen = Set(entries.map(\.id))
+        for identifier in legacySelectedTimeZoneIDs {
+            guard !(includesSystem && identifier == systemTimeZoneID) else { continue }
+            guard seen.insert(identifier).inserted else { continue }
+            guard let entry = ClockEntry.custom(identifier: identifier) else { continue }
+            entries.append(entry)
+        }
+        return entries.isEmpty ? [.system()] : entries
+    }
+
+    private func loadLegacyShowsSystemTimeZone(defaultValue: Bool) -> Bool {
+        guard defaults.object(forKey: Key.legacyShowsSystemTimeZone) != nil else {
+            return defaultValue
+        }
+        return defaults.bool(forKey: Key.legacyShowsSystemTimeZone)
     }
 
     private func loadStatusBarSwitchIntervalSeconds(defaultValue: TimeInterval) -> TimeInterval {
-        guard defaults.object(forKey: Key.statusBarSwitchIntervalSeconds) != nil else { return defaultValue }
+        guard defaults.object(forKey: Key.statusBarSwitchIntervalSeconds) != nil else {
+            return defaultValue
+        }
         return min(30, max(2, defaults.double(forKey: Key.statusBarSwitchIntervalSeconds)))
     }
 
     private func loadCalendarWeekStartDay(defaultValue: WeekStartDay) -> WeekStartDay {
-        guard defaults.object(forKey: Key.calendarWeekStartDay) != nil else { return defaultValue }
-        return WeekStartDay(rawValue: defaults.integer(forKey: Key.calendarWeekStartDay)) ?? defaultValue
+        guard defaults.object(forKey: Key.calendarWeekStartDay) != nil else {
+            return defaultValue
+        }
+        return WeekStartDay(rawValue: defaults.integer(forKey: Key.calendarWeekStartDay))
+            ?? defaultValue
     }
 
     private func loadPinnedQuickActions() -> [QuickActionReference] {
@@ -98,12 +187,43 @@ final class SettingsStore {
         return references
     }
 
+    private func loadPortableModificationDates() -> [PortableSettingField: Date] {
+        guard let stored = defaults.dictionary(
+            forKey: Key.portableModificationDates
+        ) as? [String: TimeInterval] else {
+            return [:]
+        }
+
+        var result: [PortableSettingField: Date] = [:]
+        for (rawField, timestamp) in stored {
+            guard let field = PortableSettingField(rawValue: rawField),
+                  timestamp.isFinite
+            else {
+                continue
+            }
+            result[field] = Date(timeIntervalSinceReferenceDate: timestamp)
+        }
+        return result
+    }
+
+    private func loadSyncDeviceID() -> String {
+        if let existing = defaults.string(forKey: Key.syncDeviceID), !existing.isEmpty {
+            return existing
+        }
+        let identifier = UUID().uuidString
+        defaults.set(identifier, forKey: Key.syncDeviceID)
+        return identifier
+    }
+
     private func defaultSelectedTimeZoneIDs(
         legacyMode: TimeZoneMode,
         legacyCustomTimeZoneID: String,
         systemTimeZoneID: String
     ) -> [String] {
-        guard legacyMode == .custom, legacyCustomTimeZoneID != systemTimeZoneID else { return [] }
-        return TimeZone(identifier: legacyCustomTimeZoneID) == nil ? [] : [legacyCustomTimeZoneID]
+        guard legacyMode == .custom, legacyCustomTimeZoneID != systemTimeZoneID else {
+            return []
+        }
+        return TimeZone(identifier: legacyCustomTimeZoneID) == nil
+            ? [] : [legacyCustomTimeZoneID]
     }
 }

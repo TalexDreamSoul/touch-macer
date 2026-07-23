@@ -32,12 +32,15 @@ final class QuickActionService: ObservableObject {
   @Published private(set) var feedbackMessage: String?
 
   private let appearanceService: AppearanceService
+  let powerHelperManager: PowerHelperManager
   private var keepAwakeProcess: Process?
   private var appearanceObserver: NSObjectProtocol?
   private let cleaningController = CleaningModeController()
+  private var cancellables: Set<AnyCancellable> = []
 
   init(appearanceService: AppearanceService) {
     self.appearanceService = appearanceService
+    self.powerHelperManager = PowerHelperManager()
     self.states = Dictionary(
       uniqueKeysWithValues: BuiltInQuickActionID.allCases.map { ($0, .available) }
     )
@@ -53,6 +56,13 @@ final class QuickActionService: ObservableObject {
         self?.refreshDarkModeState()
       }
     }
+    powerHelperManager.objectWillChange
+      .sink { [weak self] _ in
+        DispatchQueue.main.async {
+          self?.refreshPowerStates()
+        }
+      }
+      .store(in: &cancellables)
     refreshAll()
   }
 
@@ -94,7 +104,7 @@ final class QuickActionService: ObservableObject {
       return QuickActionItem(
         reference: reference,
         title: name,
-        systemImage: "apple.shortcuts",
+        systemImage: "command.square.fill",
         kind: .button,
         isDestructive: false,
         state: QuickActionState(
@@ -111,6 +121,7 @@ final class QuickActionService: ObservableObject {
   }
 
   func refreshAll() {
+    powerHelperManager.refreshStatus()
     refreshImmediateStates()
     DispatchQueue.global(qos: .utility).async {
       let snapshot = Self.loadSystemSnapshot()
@@ -121,6 +132,15 @@ final class QuickActionService: ObservableObject {
   }
 
   func perform(_ reference: QuickActionReference) {
+    if case .builtIn(let actionID) = reference,
+      actionID == .lowPowerMode || actionID == .preventLidSleep,
+      !powerHelperManager.registrationState.isEnabled
+    {
+      powerHelperManager.requestRegistration()
+      refreshPowerStates()
+      setFeedback(powerHelperManager.registrationState.detail)
+      return
+    }
     let selectedItem = item(for: reference)
     guard selectedItem.state.availability.isAvailable else {
       if let settingsURL = selectedItem.state.availability.settingsURL {
@@ -142,6 +162,11 @@ final class QuickActionService: ObservableObject {
   }
 
   func openRemediation(for actionID: BuiltInQuickActionID) {
+    if actionID == .lowPowerMode || actionID == .preventLidSleep {
+      powerHelperManager.requestRegistration()
+      refreshPowerStates()
+      return
+    }
     guard let settingsURL = states[actionID]?.availability.settingsURL else { return }
     NSWorkspace.shared.open(settingsURL)
   }
@@ -153,7 +178,13 @@ final class QuickActionService: ObservableObject {
         _ = try Self.runProcess("/usr/bin/pmset", arguments: ["displaysleepnow"])
         return "Displays are sleeping."
       }
-    case .lowPowerMode, .preventLidSleep, .hideNotch:
+    case .lowPowerMode:
+      performPowerToggle(actionID, target: !powerHelperManager.lowPowerModeEnabled)
+    case .preventLidSleep:
+      let target = !powerHelperManager.sleepDisabled
+      guard !target || confirmLidSleepRisk() else { return }
+      performPowerToggle(actionID, target: target)
+    case .hideNotch:
       let availability = states[actionID]?.availability
       if let settingsURL = availability?.settingsURL {
         NSWorkspace.shared.open(settingsURL)
@@ -319,23 +350,7 @@ final class QuickActionService: ObservableObject {
     setState(.keepScreenOn, isOn: keepAwakeProcess?.isRunning == true, isRunning: false)
     refreshCleaningStates()
 
-    states[.lowPowerMode] = QuickActionState(
-      availability: .unavailable(
-        "TouchMacer can read Low Power Mode but ordinary app permissions cannot change it.",
-        settingsURL: URL(string: "x-apple.systempreferences:com.apple.Battery-Settings.extension")
-      ),
-      isOn: ProcessInfo.processInfo.isLowPowerModeEnabled,
-      isRunning: false
-    )
-    states[.preventLidSleep] = QuickActionState(
-      availability: .unavailable(
-        "macOS does not expose reliable lid-closed sleep control to an ordinary application.",
-        settingsURL: URL(
-          string: "x-apple.systempreferences:com.apple.Lock-Screen-Settings.extension")
-      ),
-      isOn: false,
-      isRunning: false
-    )
+    refreshPowerStates()
 
     let hasNotchedDisplay = NSScreen.screens.contains { $0.safeAreaInsets.top > 0 }
     let notchReason =
@@ -350,6 +365,60 @@ final class QuickActionService: ObservableObject {
       isOn: false,
       isRunning: false
     )
+  }
+
+  private func refreshPowerStates() {
+    let availability: QuickActionAvailability
+    if powerHelperManager.registrationState.isEnabled {
+      availability = .available
+    } else {
+      availability = .unavailable(powerHelperManager.registrationState.detail)
+    }
+
+    states[.lowPowerMode] = QuickActionState(
+      availability: availability,
+      isOn: powerHelperManager.registrationState.isEnabled
+        ? powerHelperManager.lowPowerModeEnabled
+        : ProcessInfo.processInfo.isLowPowerModeEnabled,
+      isRunning: powerHelperManager.isWorking
+    )
+    states[.preventLidSleep] = QuickActionState(
+      availability: availability,
+      isOn: powerHelperManager.sleepDisabled,
+      isRunning: powerHelperManager.isWorking
+    )
+  }
+
+  private func performPowerToggle(_ actionID: BuiltInQuickActionID, target: Bool) {
+    setRunning(.builtIn(actionID), true)
+    let completion: (Result<Void, Error>) -> Void = { [weak self] result in
+      guard let self else { return }
+      self.refreshPowerStates()
+      switch result {
+      case .success:
+        let actionName = actionID == .lowPowerMode ? "Low Power Mode" : "Don't Sleep When Closed"
+        self.setFeedback("\(actionName) \(target ? "enabled" : "disabled").")
+      case .failure(let error):
+        self.setFeedback(error.localizedDescription)
+      }
+    }
+
+    if actionID == .lowPowerMode {
+      powerHelperManager.setLowPowerMode(target, completion: completion)
+    } else {
+      powerHelperManager.setSleepDisabled(target, completion: completion)
+    }
+  }
+
+  private func confirmLidSleepRisk() -> Bool {
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = "Keep Running With the Lid Closed?"
+    alert.informativeText =
+      "This prevents system sleep and can increase heat and battery use. Keep your Mac ventilated and do not place it in a bag while enabled."
+    alert.addButton(withTitle: "Enable")
+    alert.addButton(withTitle: "Cancel")
+    return alert.runModal() == .alertFirstButtonReturn
   }
 
   private func refreshDarkModeState() {

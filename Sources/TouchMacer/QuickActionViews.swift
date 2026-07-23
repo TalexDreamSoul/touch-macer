@@ -6,7 +6,7 @@ struct QuickActionGrid: View {
   let openMore: () -> Void
 
   private let columns = Array(
-    repeating: GridItem(.flexible(), spacing: 8),
+    repeating: GridItem(.flexible(), spacing: 6),
     count: 4
   )
 
@@ -17,17 +17,17 @@ struct QuickActionGrid: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
+    VStack(alignment: .leading, spacing: 6) {
       HStack {
         Text("Quick Actions")
-          .font(.headline)
+          .font(.subheadline.weight(.semibold))
         Spacer()
         Text("\(model.settings.pinnedQuickActions.count)/7")
           .font(.caption.weight(.medium))
           .foregroundStyle(.secondary)
       }
 
-      LazyVGrid(columns: columns, spacing: 10) {
+      LazyVGrid(columns: columns, spacing: 7) {
         ForEach(service.pinnedItems(for: model.settings.pinnedQuickActions)) { item in
           QuickActionTile(item: item, style: .compact) {
             service.perform(item.reference)
@@ -114,10 +114,13 @@ struct QuickActionsWindowView: View {
 struct QuickActionSettingsView: View {
   @ObservedObject var model: AppModel
   @ObservedObject private var service: QuickActionService
+  @ObservedObject private var powerHelper: PowerHelperManager
+  @State private var helperFeedback: String?
 
   init(model: AppModel) {
     self.model = model
     self.service = model.quickActionService
+    self.powerHelper = model.quickActionService.powerHelperManager
   }
 
   var body: some View {
@@ -194,6 +197,47 @@ struct QuickActionSettingsView: View {
       }
 
       SettingsGroup(spacing: 12) {
+        HStack(alignment: .top, spacing: 10) {
+          Image(
+            systemName: powerHelper.registrationState.isEnabled
+              ? "checkmark.shield.fill" : "shield.lefthalf.filled"
+          )
+          .font(.title3)
+          .foregroundStyle(powerHelper.registrationState.isEnabled ? Color.green : Color.orange)
+          .frame(width: 24)
+          VStack(alignment: .leading, spacing: 3) {
+            HStack {
+              Text("Power Helper")
+                .font(.headline)
+              Spacer()
+              Text(powerHelper.registrationState.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            }
+            Text(powerHelper.registrationState.detail)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            Text(
+              "Low Power Mode applies to battery and adapter power. Don't Sleep When Closed can increase heat and battery use."
+            )
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+          }
+        }
+
+        if let helperFeedback {
+          Text(helperFeedback)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+
+        HStack {
+          Spacer()
+          helperActionButton
+        }
+      }
+
+      SettingsGroup(spacing: 12) {
         VStack(alignment: .leading, spacing: 2) {
           Text("Available actions")
             .font(.headline)
@@ -233,6 +277,42 @@ struct QuickActionSettingsView: View {
     }
   }
 
+  @ViewBuilder
+  private var helperActionButton: some View {
+    switch powerHelper.registrationState {
+    case .enabled:
+      Button("Remove Helper", role: .destructive, action: removePowerHelper)
+        .disabled(powerHelper.isWorking)
+    case .requiresApproval:
+      Button("Open System Settings") {
+        powerHelper.openSystemSettings()
+      }
+      Button("Cancel Install", role: .destructive, action: removePowerHelper)
+        .disabled(powerHelper.isWorking)
+    case .unavailable:
+      Button("Install Helper") {}
+        .disabled(true)
+    case .notRegistered, .failed:
+      Button("Install Helper") {
+        helperFeedback = nil
+        powerHelper.requestRegistration()
+      }
+      .disabled(powerHelper.isWorking)
+    }
+  }
+
+  private func removePowerHelper() {
+    powerHelper.removeHelper { result in
+      switch result {
+      case .success:
+        helperFeedback = "Power Helper removed."
+      case .failure(let error):
+        helperFeedback = error.localizedDescription
+      }
+      service.refreshAll()
+    }
+  }
+
   private var availableItems: [QuickActionItem] {
     let pinned = Set(model.settings.pinnedQuickActions)
     return service.catalogItems.filter { !pinned.contains($0.reference) }
@@ -245,14 +325,14 @@ private enum QuickActionTileStyle {
 
   var height: CGFloat {
     switch self {
-    case .compact: return 72
+    case .compact: return 60
     case .catalog: return 126
     }
   }
 
   var iconSize: CGFloat {
     switch self {
-    case .compact: return 27
+    case .compact: return 24
     case .catalog: return 34
     }
   }
@@ -273,7 +353,7 @@ private struct QuickActionTile: View {
         action()
       }
     } label: {
-      VStack(spacing: style == .compact ? 5 : 8) {
+      VStack(spacing: style == .compact ? 3 : 8) {
         ZStack {
           Circle()
             .fill(iconBackground)
@@ -286,14 +366,14 @@ private struct QuickActionTile: View {
               .foregroundStyle(iconForeground)
           }
         }
-        .frame(width: style == .compact ? 38 : 54, height: style == .compact ? 38 : 54)
+        .frame(width: style == .compact ? 34 : 54, height: style == .compact ? 34 : 54)
 
         Text(item.title)
           .font(style == .compact ? .caption2 : .caption)
           .fontWeight(.medium)
           .multilineTextAlignment(.center)
           .lineLimit(2)
-          .minimumScaleFactor(0.75)
+          .minimumScaleFactor(0.72)
 
         if style == .catalog,
           let reason = item.state.availability.reason
@@ -356,20 +436,20 @@ private struct QuickActionMoreTile: View {
 
   var body: some View {
     Button(action: action) {
-      VStack(spacing: 5) {
+      VStack(spacing: 3) {
         ZStack {
           Circle()
             .fill(Color.accentColor.opacity(0.16))
           Image(systemName: "ellipsis")
-            .font(.system(size: 25, weight: .semibold))
+            .font(.system(size: 22, weight: .semibold))
             .foregroundStyle(Color.accentColor)
         }
-        .frame(width: 38, height: 38)
+        .frame(width: 34, height: 34)
         Text("More")
           .font(.caption2.weight(.medium))
           .lineLimit(1)
       }
-      .frame(maxWidth: .infinity, minHeight: 72, alignment: .top)
+      .frame(maxWidth: .infinity, minHeight: 60, alignment: .top)
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
